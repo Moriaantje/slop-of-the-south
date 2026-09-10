@@ -1,0 +1,35 @@
+import * as THREE from "three"
+
+const material = new THREE.MeshStandardMaterial({ color: 0x7fa15a, roughness: 1 })
+material.__shared = true
+
+// Heightmap (rows north→south, columns west→east) → displaced plane, plus bilinear sampling.
+export class TerrainTile {
+  constructor(data, cfg) {
+    this.ox = data.origin[0]            // west edge (game x)
+    this.oz = data.origin[1]            // north edge (game z)
+    this.n = cfg.height_n
+    this.step = cfg.height_step
+    this.size = cfg.tile_size
+    this.h = data.heights
+
+    const geo = new THREE.PlaneGeometry(this.size, this.size, this.n - 1, this.n - 1)
+    geo.rotateX(-Math.PI / 2)            // plane +y (top row) becomes -z (north), matching data order
+    const pos = geo.attributes.position
+    for (let i = 0; i < pos.count; i++) pos.setY(i, this.h[i])
+    geo.computeVertexNormals()
+
+    this.mesh = new THREE.Mesh(geo, material)
+    this.mesh.position.set(this.ox + this.size / 2, 0, this.oz + this.size / 2)
+  }
+
+  heightAt(x, z) {
+    const u = THREE.MathUtils.clamp((x - this.ox) / this.step, 0, this.n - 1.0001)
+    const v = THREE.MathUtils.clamp((z - this.oz) / this.step, 0, this.n - 1.0001)
+    const c = Math.floor(u), r = Math.floor(v), fu = u - c, fv = v - r
+    const h = this.h, n = this.n
+    const top = h[r * n + c] * (1 - fu) + h[r * n + c + 1] * fu
+    const bot = h[(r + 1) * n + c] * (1 - fu) + h[(r + 1) * n + c + 1] * fu
+    return top * (1 - fv) + bot * fv
+  }
+}

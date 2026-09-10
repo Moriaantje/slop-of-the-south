@@ -1,0 +1,22 @@
+<div id="game" data-player-id="<%= @player_id %>"></div>
+
+<div id="hud">
+  <div id="speed"><span id="kmh">0</span><small>km/h</small></div>
+  <div id="place">Westelijke Mijnstreek</div>
+  <div id="players"></div>
+</div>
+
+<div id="help">W A S D of pijltjes · spatie handrem · R terug op de weg</div>
+
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb8cf;
+               font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif; }
+  #game canvas { display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #1d2b1f; }
+  #speed { position: absolute; right: 28px; bottom: 24px; text-align: right;
+           font-size: 72px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  #speed small { display: block; font-size: 16px; font-weight: 500; opacity: .7; }
+  #place { position: absolute; left: 28px; top: 22px; font-size: 20px; font-weight: 600; }
+  #players { position: absolute; left: 28px; top: 52px; font-size: 14px; opacity: .8; }
+  #help { position: fixed; left: 28px; bottom: 24px; font-size: 13px; color: #1d2b1f; opacity: .65; }
+</style>
