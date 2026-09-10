@@ -83,7 +83,11 @@ Tiles are static JSON served by nginx/Rails' static file server — no DB hit wh
     game/ChunkManager.js     loads/unloads tiles in a radius around the car
     game/TerrainTile.js      heightmap → mesh, bilinear heightAt(x, z)
     game/Roads.js            polylines → draped ribbons
-    game/Buildings.js        footprints → extruded, merged meshes
+    game/Buildings.js        footprints → extruded, merged meshes (OSM / fallback)
+    game/BuildingMeshes.js   3D BAG LoD2.2 faces → triangulated, flat-shaded meshes
+    game/Trees.js            procedural branching trees, a few seeded variants per kind, instanced per tile;
+                             variant, rotation, width and tint come from the tree position, so every tree is stable
+    game/Locator.js          nearest named road + nearest place for the street sign
     game/Vehicle.js          arcade bicycle-model car physics
     game/Input.js            keyboard
     game/Network.js          Action Cable
