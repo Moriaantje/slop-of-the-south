@@ -10,10 +10,24 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_10_000005) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_10_000006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
+  enable_extension "postgis_sfcgal"
+
+  create_table "building_meshes", force: :cascade do |t|
+    t.string "bag_id", null: false
+    t.geometry "center", limit: {srid: 28992, type: "st_point"}, null: false
+    t.datetime "created_at", null: false
+    t.geometry "geom", limit: {srid: 28992, type: "multi_polygon", has_z: true}, null: false
+    t.float "ground_height"
+    t.integer "labels", default: [], null: false, array: true
+    t.string "roof_type"
+    t.datetime "updated_at", null: false
+    t.index ["bag_id"], name: "index_building_meshes_on_bag_id", unique: true
+    t.index ["center"], name: "index_building_meshes_on_center", using: :gist
+  end
 
   create_table "buildings", force: :cascade do |t|
     t.datetime "created_at", null: false

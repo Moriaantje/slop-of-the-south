@@ -69,7 +69,7 @@ namespace :bag3d do
     puts "Done → #{BAG3D_TILES}"
   end
 
-  desc "Import data/bag3d/tiles/*.gpkg into PostGIS as buildings (source 'bag3d'; LoD1.3 parts, roof = 70th percentile)"
+  desc "Import data/bag3d/tiles/*.gpkg into PostGIS: LoD1.3 parts → buildings (source 'bag3d'), LoD2.2 surfaces → building_meshes"
   task import: :environment do
     conn = ActiveRecord::Base.connection
     pg = BAG3D_PG.call
@@ -85,6 +85,10 @@ namespace :bag3d do
          "-lco", "GEOMETRY_NAME=geom", "-sql", "SELECT identificatie, b3_dd_id, b3_pand_deel_id, b3_h_70p, geom FROM lod13_2d", verbose: false
       sh "ogr2ogr", "-q", "-f", "PostgreSQL", pg, file, mode, "-nln", "bag3d_pand", "-nlt", "NONE",
          "-sql", "SELECT identificatie, b3_h_maaiveld, b3_dak_type, b3_bouwlagen, oorspronkelijkbouwjaar, status FROM pand", verbose: false
+      # -a_srs, not -t_srs: reprojecting out of the compound RD+NAP CRS (EPSG:7415) zeroes the Z coordinates
+      # (no -nlt/-dim either: forcing MULTIPOLYGON flattens the Z away; the layer already is MultiPolygon Z)
+      sh "ogr2ogr", "-q", "-f", "PostgreSQL", pg, file, mode, "-nln", "bag3d_lod22_3d", "-a_srs", "EPSG:28992",
+         "-lco", "GEOMETRY_NAME=geom", "-sql", "SELECT identificatie, labels, geom FROM lod22_3d", verbose: false
     end
     puts
 
@@ -113,8 +117,21 @@ namespace :bag3d do
         ground_height = EXCLUDED.ground_height, roof_height = EXCLUDED.roof_height, roof_type = EXCLUDED.roof_type,
         year = EXCLUDED.year, geom = EXCLUDED.geom, updated_at = now()
     SQL
-    conn.execute("DROP TABLE bag3d_lod13_2d, bag3d_pand")
-    puts "Upserted #{n} building parts from #{files.size} tiles; buildings now: bag3d=#{Building.where(source: 'bag3d').count} osm=#{Building.where(source: 'osm').count}"
+    # 3. LoD2.2 surfaces (roof planes + walls) per building; labels "(n:0,2,2,1)" → int[] with 0 ground, 1 roof, 2 wall
+    m = conn.exec_update(<<~'SQL')   # single-quoted heredoc: keeps the regex backslashes
+      INSERT INTO building_meshes (bag_id, roof_type, ground_height, labels, center, geom, created_at, updated_at)
+      SELECT DISTINCT ON (s.identificatie) s.identificatie, p.b3_dak_type, p.b3_h_maaiveld,
+             string_to_array(regexp_replace(s.labels, '^\(\d+:|\)$', '', 'g'), ',')::int[],
+             ST_Centroid(ST_Force2D(s.geom)), s.geom, now(), now()
+      FROM bag3d_lod22_3d s
+      LEFT JOIN bag3d_pand p ON p.identificatie = s.identificatie
+      WHERE ST_NumGeometries(s.geom) > 0
+      ORDER BY s.identificatie
+      ON CONFLICT (bag_id) DO UPDATE SET roof_type = EXCLUDED.roof_type, ground_height = EXCLUDED.ground_height,
+        labels = EXCLUDED.labels, center = EXCLUDED.center, geom = EXCLUDED.geom, updated_at = now()
+    SQL
+    conn.execute("DROP TABLE bag3d_lod13_2d, bag3d_pand, bag3d_lod22_3d")
+    puts "Upserted #{n} LoD1.3 parts and #{m} LoD2.2 meshes from #{files.size} tiles; buildings now: bag3d=#{Building.where(source: 'bag3d').count} osm=#{Building.where(source: 'osm').count}, meshes=#{BuildingMesh.count}"
   end
 
   desc "Delete downloaded 3D BAG tiles and index"

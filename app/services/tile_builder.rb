@@ -9,12 +9,14 @@ class TileBuilder
   def build(tx, ty)
     s = World::TILE_SIZE
     x0, y0 = tx * s, ty * s
+    meshes = meshes_for(tx, ty)
     {
       tx: tx, ty: ty,
       origin: World.to_game(x0, y0 + s),      # game-space corner (west, north)
       heights: heights_for(x0, y0),
       roads: roads_for(tx, ty),
-      buildings: buildings_for(tx, ty)
+      buildings: buildings_for(tx, ty, skip: meshes.map { _1[:id] }.to_set),
+      meshes: meshes
     }
   end
 
@@ -42,8 +44,10 @@ class TileBuilder
     end
   end
 
-  def buildings_for(tx, ty)
+  # Extruded boxes: OSM footprints and any 3D BAG parts whose building has no LoD2.2 mesh.
+  def buildings_for(tx, ty, skip: Set.new)
     Building.in_tile(tx, ty).filter_map do |b|
+      next if b["source"] == "bag3d" && skip.include?(b["source_id"].split("/").first.split(".").last)   # mesh ids are the numeric BAG id
       ring = b["geojson"]["coordinates"]&.first
       next if ring.nil? || ring.size < 4
       ring = ring[0...-1] # drop closing vertex
@@ -58,6 +62,40 @@ class TileBuilder
         roof: b["roof_type"],
         footprint: ring.map { |x, y| World.to_game(x, y).map { _1.round(2) } }
       }.compact
+    end
+  end
+
+  # 3D BAG LoD2.2 surfaces as faces the client triangulates: per building an origin (game units) and faces
+  # [label, outer_ring, hole_ring, ...] with vertices as flat centimetre offsets [dx, dy, dz, ...] from the origin.
+  # Ground faces are dropped (the terrain covers them). A building whose ground level lies above the DEM is
+  # lowered onto the terrain so it never floats.
+  def meshes_for(tx, ty)
+    BuildingMesh.in_tile(tx, ty).filter_map do |m|
+      polys = m["geojson"]["coordinates"]
+      next if polys.blank?
+      labels = m["labels"].is_a?(String) ? m["labels"].scan(/\d+/).map(&:to_i) : m["labels"]
+      ground = polys.flat_map { |rings| rings.first.map { _1[2] } }.min
+      footprint = polys.each_with_index.filter_map { |rings, i| rings.first if labels[i] == BuildingMesh::LABEL_GROUND }.flatten(1)
+      footprint = polys.flat_map(&:first) if footprint.empty?
+      base = footprint.map { |x, y, _| @heights.sample(x, y) }.min
+      dz = [ base - ground, 0.0 ].min
+      ox, oz = World.to_game(*polys.first.first.first[0, 2]).map { _1.round(2) }
+      oy = (ground + dz).round(2)
+      faces = polys.each_with_index.filter_map do |rings, i|
+        next if labels[i] == BuildingMesh::LABEL_GROUND
+        [ labels[i] || BuildingMesh::LABEL_WALL, *rings.map { |ring| ring_offsets(ring, ox, oy, oz, dz) } ]
+      end
+      next if faces.empty?
+      { id: m["bag_id"].split(".").last, roof: m["roof_type"], o: [ ox, oy, oz ], f: faces }
+    end
+  end
+
+  # ring of RD [x, y, z] → flat centimetre offsets from the origin (closing vertex dropped)
+  def ring_offsets(ring, ox, oy, oz, dz)
+    pts = ring.first == ring.last ? ring[0...-1] : ring
+    pts.flat_map do |x, y, z|
+      gx, gz = World.to_game(x, y)
+      [ ((gx - ox) * 100).round, ((z + dz - oy) * 100).round, ((gz - oz) * 100).round ]
     end
   end
 

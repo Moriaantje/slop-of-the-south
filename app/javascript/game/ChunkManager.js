@@ -2,6 +2,7 @@ import * as THREE from "three"
 import { TerrainTile } from "game/TerrainTile"
 import { buildRoads } from "game/Roads"
 import { buildBuildings } from "game/Buildings"
+import { buildBuildingMeshes } from "game/BuildingMeshes"
 
 // Streams 500 m tiles in a square around the player and disposes the ones left behind.
 export class ChunkManager {
@@ -69,6 +70,8 @@ export class ChunkManager {
       if (roads) group.add(roads)
       const buildings = buildBuildings(data.buildings)
       if (buildings) group.add(buildings)
+      const meshes = buildBuildingMeshes(data.meshes)
+      if (meshes) group.add(meshes)
       this.scene.add(group)
       this.tiles.set(key, { group, terrain, roads: data.roads })
     } catch (e) {

@@ -9,7 +9,7 @@ class Building < ApplicationRecord
   def self.in_tile(tx, ty)
     env = Road.tile_envelope_sql(tx, ty)
     connection.select_all(<<~SQL).map { |r| r.merge("geojson" => JSON.parse(r["geojson"])) }
-      SELECT source, height, kind, roof_type, ground_height, roof_height, ST_AsGeoJSON(geom, 2) AS geojson
+      SELECT source, source_id, height, kind, roof_type, ground_height, roof_height, ST_AsGeoJSON(geom, 2) AS geojson
       FROM buildings b
       WHERE ST_Intersects(ST_Centroid(geom), #{env})
         AND (source <> 'osm' OR NOT EXISTS (

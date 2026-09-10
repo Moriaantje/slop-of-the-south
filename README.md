@@ -41,7 +41,7 @@ Game space is RD minus a fixed origin so floats stay small:
 | Layer | Source | Notes |
 |---|---|---|
 | Roads, water, land use | OpenStreetMap via Overpass (MVP) or Geofabrik Limburg `.pbf` + `osm2pgsql` (full box) | `rake osm:fetch osm:import` |
-| Buildings | **3D BAG** (3dbag.nl, TU Delft, CC BY 4.0) | LoD1.3: every building split into parts with a measured roof height (70th percentile) and the ground level. `rake bag3d:fetch bag3d:import` downloads the GeoPackage tiles and loads them with `ogr2ogr`. |
+| Buildings | **3D BAG** (3dbag.nl, TU Delft, CC BY 4.0) | LoD2.2 surfaces: the real roof planes and walls per building (`building_meshes`, ~12 faces per house), triangulated on the client. LoD1.3 parts are imported too as a fallback for the few buildings without a LoD2.2 model. `rake bag3d:fetch bag3d:import` downloads the GeoPackage tiles and loads them with `ogr2ogr`. |
 | Buildings (fallback) | OpenStreetMap footprints | Only used where no 3D BAG building overlaps, i.e. across the German border. `height` / `building:levels` tags, fallback 6 m. |
 | Place names | OpenStreetMap `place=*` nodes (towns, villages, wijken) | Drive the HUD street sign (nearest named road + nearest place) |
 | Terrain | **AHN** (Actueel Hoogtebestand Nederland) DTM via PDOK WCS | OSM has no elevation. AHN is 0.5 m lidar; the WCS resamples it to the 10 m grid on request, `gdal_fillnodata` fills the holes under buildings and water. Zuid-Limburg is genuinely hilly — 27 m at the Maas to 114 m on the plateau within the phase-1 box. |
@@ -58,7 +58,8 @@ in the game's about screen.
                       rake tiles:build ──► public/tiles/{tx}_{ty}.json
                                             ├── heights[51×51]   (10 m spacing)
                                             ├── roads[]          {kind, width, pts}
-                                            └── buildings[]      {base, height, footprint}
+                                            ├── buildings[]      {base, height, footprint}   (OSM / fallback boxes)
+                                            └── meshes[]         {id, roof, o, f: [[label, ring…]…]} (3D BAG LoD2.2 faces, cm offsets)
 
 Tiles are static JSON served by nginx/Rails' static file server — no DB hit while playing.
 
@@ -148,4 +149,6 @@ Open http://localhost:3000 in two browser windows and drive.
   and Solid Cable in production.
 - Tiles are requested from `public/tiles/` first and fall back to `/api/tiles/:tx/:ty`, which builds the tile and caches it
   on disk, so an empty database yields a flat 40 m NAP world and a 404 per tile in the dev log on first load.
+- With LoD2.2 buildings a dense town tile is about 1 MB of JSON (roughly 100 MB for phase 1). Fine locally; serve
+  `public/tiles` gzipped (or move to a binary tile format) before putting it on the internet.
 Controls: W/↑ accelerate, S/↓ brake/reverse, A/D or ←/→ steer, Space handbrake, R reset to road.
