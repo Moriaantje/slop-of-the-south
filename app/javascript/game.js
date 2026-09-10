@@ -5,7 +5,8 @@ import { Vehicle } from "game/Vehicle"
 import { Input } from "game/Input"
 import { Network } from "game/Network"
 import { RemoteCars } from "game/RemoteCars"
-import { Locator } from "game/Locator"
+import { Locator, nearestPointOnRoads } from "game/Locator"
+import { Minimap } from "game/Minimap"
 
 async function main() {
   const config = await (await fetch("/api/world")).json()
@@ -25,6 +26,9 @@ async function main() {
   const remotes = new RemoteCars(world.scene)
   const net     = new Network({ room: "main", playerId, onMessage: (m) => remotes.receive(m) })
   const locator = new Locator(config.places)
+  const minimap = new Minimap(document.getElementById("minimap"), config, {
+    onTeleport: (x, z) => { car.reset({ x, z, yaw: car.yaw }); placed = false; snapToRoad = true }
+  })
 
   world.scene.add(car.mesh)
 
@@ -36,15 +40,22 @@ async function main() {
   const timer = new THREE.Timer()
   let netTimer = 0, signTimer = 0
   let placed = false          // car and camera snapped onto the terrain once the spawn tile is in
+  let snapToRoad = false      // after a map teleport: move onto the nearest street once its tile is in
 
   function frame(now) {
     timer.update(now)
     const dt = Math.min(timer.getDelta(), 1 / 20)
 
     chunks.update(car.x, car.z)
+    if (input.toggleMap) minimap.toggle()
     if (chunks.ready(car.x, car.z)) {
       if (input.reset) { car.reset(config.spawn); placed = false }
       if (!placed) {
+        if (snapToRoad) {
+          const p = nearestPointOnRoads(car.x, car.z, chunks.roadsAround(car.x, car.z))
+          if (p) { car.x = p.x; car.z = p.z; car.yaw = p.yaw }
+          snapToRoad = false
+        }
         car.y = chunks.heightAt(car.x, car.z)
         car.mesh.position.y = car.y
         world.followCamera(car, 1e3)   // huge dt → camera jumps straight behind the car instead of rising out of the ground
@@ -69,6 +80,7 @@ async function main() {
       placeEl.hidden = !locator.place
       biomeEl.textContent = chunks.biomeAt(car.x, car.z) ?? ""
     }
+    minimap.update(car, remotes)
     
     kmh.textContent = Math.round(Math.abs(car.speed) * 3.6)
     playersEl.textContent = remotes.count ? `${remotes.count} andere ${remotes.count === 1 ? "chauffeur" : "chauffeurs"} online` : ""

@@ -16,7 +16,8 @@
   <div id="speed"><span id="kmh">0</span><small>km/h</small></div>
 </div>
 
-<div id="help">W A S D of pijltjes · spatie handrem · R terug op de weg</div>
+<canvas id="minimap" class="minimap"></canvas>
+<div id="help">W A S D of pijltjes · spatie handrem · R terug op de weg · M kaart</div>
 
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb8cf;
@@ -44,4 +45,8 @@
            font-size: 72px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
   #speed small { display: block; font-size: 16px; font-weight: 500; opacity: .7; }
   #help { position: fixed; left: 28px; bottom: 24px; font-size: 13px; color: #1d2b1f; opacity: .65; }
+  .minimap { position: fixed; left: 28px; bottom: 52px; width: 230px; height: 230px; border: 3px solid #fff; border-radius: 10px;
+             box-shadow: 0 3px 10px rgba(0, 0, 0, .3); background: #e8e4d8; cursor: pointer; }
+  .minimap.expanded { left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -50%); width: min(92vw, 92vh); height: min(92vw, 92vh);
+                      cursor: crosshair; }
 </style>

@@ -10,7 +10,9 @@ module Api
         # towards Sittard. yaw is radians, 0 = north, positive turns left; see Vehicle.js.
         spawn: { x: 1293.2, z: -1406.9, yaw: -0.611 },
         # Towns, villages and districts (game units) for the street sign
-        places: Place.for_client
+        places: Place.for_client,
+        # play area in RD metres [x0, y0, x1, y1] (the minimap shows this when expanded)
+        bounds: World.bounds_rd
       }
     end
   end

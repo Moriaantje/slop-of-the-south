@@ -18,7 +18,8 @@ export class RemoteCars {
     if (msg.type !== "move") return
     let car = this.cars.get(msg.id)
     if (!car) {
-      car = { mesh: makeCarMesh(colorFor(msg.id)), buf: [], lastSeen: 0 }
+      const color = colorFor(msg.id)
+      car = { mesh: makeCarMesh(color), color, buf: [], lastSeen: 0 }
       this.scene.add(car.mesh)
       this.cars.set(msg.id, car)
     }

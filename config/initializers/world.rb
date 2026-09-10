@@ -16,6 +16,15 @@ module World
     ENV["WORLD_BBOX"] == "full" ? BBOX_FULL : BBOX_PHASE_1
   end
 
+  # RD envelope [x0, y0, x1, y1] of the active bbox (memoised; needs PostGIS)
+  def self.bounds_rd
+    @bounds_rd ||= begin
+      s, w, n, e = bbox
+      r = ActiveRecord::Base.connection.select_one("SELECT ST_XMin(g) x0, ST_YMin(g) y0, ST_XMax(g) x1, ST_YMax(g) y1 FROM (SELECT ST_Transform(ST_MakeEnvelope(#{w}, #{s}, #{e}, #{n}, 4326), 28992) AS g) t")
+      r.values_at("x0", "y0", "x1", "y1").map { _1.to_f.round }
+    end
+  end
+
   # RD metres → game units (x east, z south)
   def self.to_game(x, y) = [ x - ORIGIN_X, -(y - ORIGIN_Y) ]
 

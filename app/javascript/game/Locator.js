@@ -39,6 +39,24 @@ export class Locator {
   }
 }
 
+// Closest point on any road within maxDist metres, with the heading along that road: used to land teleports on a street.
+export function nearestPointOnRoads(x, z, roads, maxDist = 120) {
+  let best = null, bestD = maxDist * maxDist
+  for (const road of roads) {
+    const pts = road.pts
+    for (let i = 1; i < pts.length; i++) {
+      const [ax, az] = pts[i - 1], [bx, bz] = pts[i]
+      const dx = bx - ax, dz = bz - az
+      const len2 = dx * dx + dz * dz || 1
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2))
+      const px = ax + dx * t, pz = az + dz * t
+      const d = (px - x) ** 2 + (pz - z) ** 2
+      if (d < bestD) { bestD = d; best = { x: px, z: pz, yaw: Math.atan2(-dx, -dz) } }   // yaw 0 = north (-z), positive = left
+    }
+  }
+  return best
+}
+
 function distSqToPolyline(x, z, pts) {
   let best = Infinity
   for (let i = 1; i < pts.length; i++) {

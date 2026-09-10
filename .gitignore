@@ -42,3 +42,4 @@
 /data/*.prj
 /data/*.aux.xml
 /public/tiles/
+/public/map/
