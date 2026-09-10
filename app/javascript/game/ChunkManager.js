@@ -40,6 +40,18 @@ export class ChunkManager {
     const t = this.tiles.get(this.tileIndex(x, z).join("_"))
     return t && !t.loading ? t.terrain.heightAt(x, z) : 0
   }
+  
+  // Road polylines of the tile under (x, z) and its eight neighbours, for the street sign.
+  roadsAround(x, z) {
+    const [cx, cy] = this.tileIndex(x, z)
+    const out = []
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const t = this.tiles.get(`${cx + dx}_${cy + dy}`)
+        if (t && !t.loading) out.push(...t.roads)
+      }
+    return out
+  }
 
   async load(tx, ty, key) {
     this.tiles.set(key, { loading: true })
@@ -58,7 +70,7 @@ export class ChunkManager {
       const buildings = buildBuildings(data.buildings)
       if (buildings) group.add(buildings)
       this.scene.add(group)
-      this.tiles.set(key, { group, terrain })
+      this.tiles.set(key, { group, terrain, roads: data.roads })
     } catch (e) {
       console.warn(e)
       this.tiles.delete(key)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_10_000003) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_10_000004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -26,6 +26,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_000003) do
     t.datetime "updated_at", null: false
     t.index ["geom"], name: "index_buildings_on_geom", using: :gist
     t.index ["osm_id"], name: "index_buildings_on_osm_id", unique: true
+  end
+
+  create_table "places", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.geometry "geom", limit: {srid: 28992, type: "st_point"}, null: false
+    t.string "kind", null: false
+    t.string "name", null: false
+    t.bigint "osm_id", null: false
+    t.integer "population"
+    t.datetime "updated_at", null: false
+    t.index ["geom"], name: "index_places_on_geom", using: :gist
+    t.index ["kind"], name: "index_places_on_kind"
+    t.index ["osm_id"], name: "index_places_on_osm_id", unique: true
   end
 
   create_table "roads", force: :cascade do |t|

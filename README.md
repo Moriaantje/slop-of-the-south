@@ -42,6 +42,7 @@ Game space is RD minus a fixed origin so floats stay small:
 |---|---|---|
 | Roads, water, land use | OpenStreetMap via Overpass (MVP) or Geofabrik Limburg `.pbf` + `osm2pgsql` (full box) | `rake osm:fetch osm:import` |
 | Building footprints | OpenStreetMap | `height` / `building:levels` tags, fallback 6 m |
+| Place names | OpenStreetMap `place=*` nodes (towns, villages, wijken) | Drive the HUD street sign (nearest named road + nearest place) |
 | Building heights (upgrade) | **3D BAG** (3dbag.nl, TU Delft, CC-BY) | Far better heights than OSM. Import the GeoPackage with `ogr2ogr` into the `buildings` table. |
 | Terrain | **AHN** (Actueel Hoogtebestand Nederland) DTM via PDOK | OSM has no elevation. AHN is 0.5 m lidar; downsample to 10 m with `gdalwarp`. Zuid-Limburg is genuinely hilly — the Geleenbeek valley and the Schinnen/Puth hills will look great. |
 
@@ -88,7 +89,7 @@ Tiles are static JSON served by nginx/Rails' static file server — no DB hit wh
 ### 1.7 Milestones
 
 1. **Drive on terrain** — flat tiles, one car, WASD, chase camera. *(this scaffold)*
-2. **Real roads & buildings** — Overpass import for the phase-1 box; tiles stream.
+2. **Real roads & buildings** — Overpass import for the phase-1 box; tiles stream. *(done: 6.3k roads, 60k buildings, street sign HUD)*
 3. **Real terrain** — AHN heights; buildings sit correctly on slopes.
 4. **Multiplayer** — see each other drive; name tags. *(channel + client already scaffolded)*
 5. **Feel** — sound, skid marks, better car model, day/night, collisions with buildings.

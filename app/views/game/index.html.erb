@@ -1,9 +1,17 @@
 <div id="game" data-player-id="<%= @player_id %>"></div>
 
 <div id="hud">
+  <div id="signs">
+    <%# Straatnaambord: blue, white inner frame, uppercase; the wijk in small letters above the street %>
+    <div id="sign" class="bord" hidden>
+      <div id="sign-district" class="bord-wijk"></div>
+      <div id="sign-street"></div>
+    </div>
+    <%# Plaatsnaambord for the town or village %>
+    <div id="sign-place" class="bord bord-plaats" hidden></div>
+    <div id="players"></div>
+  </div>
   <div id="speed"><span id="kmh">0</span><small>km/h</small></div>
-  <div id="place">Westelijke Mijnstreek</div>
-  <div id="players"></div>
 </div>
 
 <div id="help">W A S D of pijltjes · spatie handrem · R terug op de weg</div>
@@ -11,12 +19,24 @@
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb8cf;
                font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif; }
+  [hidden] { display: none !important; }
   #game canvas { display: block; }
   #hud { position: fixed; inset: 0; pointer-events: none; color: #1d2b1f; }
+  #signs { position: absolute; left: 28px; top: 22px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+
+  /* Dutch road-sign look: RAL 5017-ish blue, white text, thin white frame just inside the edge */
+  .bord { position: relative; background: #0f3f8f; color: #fff; border-radius: 6px; padding: 11px 22px 12px;
+          font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-weight: 700; text-transform: uppercase;
+          letter-spacing: .06em; text-align: center; box-shadow: 0 2px 6px rgba(0, 0, 0, .25); }
+  .bord::after { content: ""; position: absolute; inset: 4px; border: 2px solid #fff; border-radius: 3px; pointer-events: none; }
+  #sign { min-width: 240px; font-size: 28px; line-height: 1.05; }
+  .bord-wijk { font-size: 12px; font-weight: 500; letter-spacing: .16em; opacity: .95; margin-bottom: 4px; }
+  .bord-wijk:empty { display: none; }
+  .bord-plaats { font-size: 16px; padding: 7px 16px 8px; }
+  #players { font-size: 14px; opacity: .8; }
+
   #speed { position: absolute; right: 28px; bottom: 24px; text-align: right;
            font-size: 72px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
   #speed small { display: block; font-size: 16px; font-weight: 500; opacity: .7; }
-  #place { position: absolute; left: 28px; top: 22px; font-size: 20px; font-weight: 600; }
-  #players { position: absolute; left: 28px; top: 52px; font-size: 14px; opacity: .8; }
   #help { position: fixed; left: 28px; bottom: 24px; font-size: 13px; color: #1d2b1f; opacity: .65; }
 </style>

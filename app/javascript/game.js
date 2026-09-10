@@ -5,6 +5,7 @@ import { Vehicle } from "game/Vehicle"
 import { Input } from "game/Input"
 import { Network } from "game/Network"
 import { RemoteCars } from "game/RemoteCars"
+import { Locator } from "game/Locator"
 
 async function main() {
   const config = await (await fetch("/api/world")).json()
@@ -17,13 +18,16 @@ async function main() {
   const car     = new Vehicle(config.spawn)
   const remotes = new RemoteCars(world.scene)
   const net     = new Network({ room: "main", playerId, onMessage: (m) => remotes.receive(m) })
+  const locator = new Locator(config.places)
 
   world.scene.add(car.mesh)
 
   const kmh = document.getElementById("kmh")
   const playersEl = document.getElementById("players")
+  const signEl = document.getElementById("sign"), streetEl = document.getElementById("sign-street")
+  const districtEl = document.getElementById("sign-district"), placeEl = document.getElementById("sign-place")
   const timer = new THREE.Timer()
-  let netTimer = 0
+  let netTimer = 0, signTimer = 0
 
   function frame(now) {
     timer.update(now)
@@ -40,6 +44,17 @@ async function main() {
     netTimer += dt
     if (netTimer > 0.1) { netTimer = 0; net.sendMove(car.state()) }
 
+    signTimer += dt
+    if (signTimer > 0.25) {
+      signTimer = 0
+      locator.update(car.x, car.z, chunks.roadsAround(car.x, car.z))
+      streetEl.textContent = locator.street ?? ""
+      districtEl.textContent = locator.district ?? ""
+      signEl.hidden = !locator.street
+      placeEl.textContent = locator.place ?? ""
+      placeEl.hidden = !locator.place
+    }
+    
     kmh.textContent = Math.round(Math.abs(car.speed) * 3.6)
     playersEl.textContent = remotes.count ? `${remotes.count} andere ${remotes.count === 1 ? "chauffeur" : "chauffeurs"} online` : ""
 

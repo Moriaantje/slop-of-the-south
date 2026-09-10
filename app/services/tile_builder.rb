@@ -37,7 +37,7 @@ class TileBuilder
     Road.in_tile(tx, ty).flat_map do |r|
       lines_from(r["geojson"]).filter_map do |coords|
         next if coords.size < 2
-        { kind: r["highway"], width: r["width"], pts: coords.map { |x, y| World.to_game(x, y).map { _1.round(2) } } }
+        { kind: r["highway"], name: r["name"], width: r["width"], pts: coords.map { |x, y| World.to_game(x, y).map { _1.round(2) } } }
       end
     end
   end
