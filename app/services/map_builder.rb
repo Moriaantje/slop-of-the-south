@@ -9,10 +9,11 @@ class MapBuilder
   def overview
     x0, y0, x1, y1 = World.bounds_rd
     env = "ST_MakeEnvelope(#{x0}, #{y0}, #{x1}, #{y1}, 28992)"
+    big = (x1 - x0) * (y1 - y0) > 500e6                                             # a province rather than a town
     {
       bounds: [ *World.to_game(x0, y1), *World.to_game(x1, y0) ].map(&:round),   # [x_west, z_north, x_east, z_south]
-      cover: cover(env, simplify: 8, min_area: 2500),
-      roads: roads(env, MAIN_ROADS, simplify: 10, names: false),
+      cover: cover(env, simplify: big ? 30 : 8, min_area: big ? 30_000 : 2500),
+      roads: roads(env, big ? %w[motorway trunk primary secondary] : MAIN_ROADS, simplify: big ? 30 : 10, names: false),
       cells: [ x0.fdiv(CELL).floor, y0.fdiv(CELL).floor, x1.fdiv(CELL).ceil, y1.fdiv(CELL).ceil ]   # exclusive upper bounds
     }
   end

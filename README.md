@@ -119,7 +119,7 @@ Tiles are static JSON served by nginx/Rails' static file server — no DB hit wh
 
 ```bash
 # System deps
-brew install postgresql postgis gdal      # or apt: postgresql postgis gdal-bin
+brew install gdal                          # ogr2ogr, gdalwarp, gdal_fillnodata; PostgreSQL + PostGIS via Postgres.app or brew
 
 rails new mijnstreek-drive -d postgresql --skip-jbuilder
 cd mijnstreek-drive
@@ -131,22 +131,29 @@ bin/rails importmap:install
 
 Edit `config/database.yml` and set `adapter: postgis` for every environment.
 
+The world is the province of Limburg by default (`WORLD_BBOX=limburg`; `phase1` = Sittard–Geleen, `full` = the
+Mijnstreek box). Every task below works on that area.
+
 ```bash
 bin/rails db:create db:migrate
-bin/rails osm:fetch            # Overpass → data/osm/*.json  (phase-1 box, ~1–3 min)
-bin/rails osm:import           # → PostGIS
-bin/rails bag3d:fetch          # 3D BAG GeoPackage tiles for the box → data/bag3d/tiles (~160 MB for phase 1)
-bin/rails bag3d:import         # → PostGIS buildings (source bag3d); needs GDAL
-bin/rails bgt:fetch            # BGT trees, terrain, pavement, water → data/bgt (paged GeoJSON, ~1 GB for phase 1)
-bin/rails bgt:import           # → PostGIS trees (registered, woodland, orchards) and land_covers
-# real terrain (needs GDAL: brew install gdal):
-bin/rails dem:fetch            # AHN terrain model from PDOK WCS → data/dem_raw.tif (10 m, ~1 min)
-bin/rails dem:build            # fill holes, convert → data/dem.asc
-bin/rails tiles:build          # → public/tiles/*.json  (flat terrain if no dem.asc)
-bin/rails map:build            # → public/map/overview.json + 1 km cells for the minimap (also built on demand)
 bin/rails border:fetch         # Limburg province polygon (PDOK) → boundaries table; the edge of the world
+bin/rails osm:pbf_fetch        # Geofabrik limburg-latest.osm.pbf (100 MB)
+bin/rails osm:pbf_import       # → roads (101k) and places (1k) via ogr2ogr
+bin/rails bag3d:fetch          # 3D BAG GeoPackage tiles for the box → data/bag3d/tiles (1075 tiles, ~2.5 GB gz / 13 GB)
+bin/rails bag3d:import         # → PostGIS buildings (LoD1.3 parts) and building_meshes (LoD2.2)
+bin/rails bgt:bulk_fetch       # BGT extracts per municipality via PDOK's download API → data/bgt/bulk/*.zip (~5 GB)
+bin/rails bgt:bulk_import      # → land_covers (terrain, pavement, water) and trees (registered, woods, orchards)
+bin/rails dem:fetch            # AHN terrain model from PDOK WCS, chunked → data/dem_raw.tif (10 m)
+bin/rails dem:build            # fill holes, convert → data/dem.raw + dem.json (binary, read lazily)
+bin/rails tiles:build          # → public/tiles/*.json for every tile inside the province (~9k)
+bin/rails map:build            # → public/map/overview.json + 1 km cells for the minimap (also built on demand)
 bin/dev                        # Rails (Puma on :3000)
 ```
+
+For a small area (`WORLD_BBOX=phase1`) the paged alternatives still work: `osm:fetch osm:import` (Overpass) and
+`bgt:fetch bgt:import` (OGC API Features).
+
+Edit `config/database.yml` and set `adapter: postgis` for every environment.
 
 Open http://localhost:3000 in two browser windows and drive.
 

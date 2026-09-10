@@ -41,5 +41,7 @@
 /data/*.tif
 /data/*.prj
 /data/*.aux.xml
+/data/dem.*
+/data/dem_chunks/
 /public/tiles/
 /public/map/

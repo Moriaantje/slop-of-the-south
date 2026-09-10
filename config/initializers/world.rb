@@ -11,9 +11,15 @@ module World
   # WGS84 bounding boxes [south, west, north, east]
   BBOX_FULL    = [ 50.90, 5.70, 51.05, 6.02 ].freeze   # Stein/Urmond ↔ Brunssum/Schinveld
   BBOX_PHASE_1 = [ 50.94, 5.78, 51.01, 5.90 ].freeze   # Sittard–Geleen–Beek–Neerbeek
+  BBOX_LIMBURG = [ 50.74, 5.55, 51.79, 6.24 ].freeze   # the whole province (RD 167495–213448, 306846–421225)
 
+  # WORLD_BBOX=phase1 | full | limburg (default): the area every fetch/import/build task works on
   def self.bbox
-    ENV["WORLD_BBOX"] == "full" ? BBOX_FULL : BBOX_PHASE_1
+    case ENV.fetch("WORLD_BBOX", "limburg")
+    when "phase1" then BBOX_PHASE_1
+    when "full"   then BBOX_FULL
+    else BBOX_LIMBURG
+    end
   end
 
   # RD envelope [x0, y0, x1, y1] of the active bbox (memoised; needs PostGIS)

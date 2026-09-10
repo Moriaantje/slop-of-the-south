@@ -244,10 +244,14 @@ export class Minimap {
   drawLabels() {
     const { ctx } = this
     ctx.textAlign = "center"; ctx.textBaseline = "middle"
+    // label density follows the zoom: a province at fit scale shows cities and towns only
+    const s = this.view.scale
     for (const p of this.cfg.places) {
       const settlement = ["city", "town", "village", "hamlet"].includes(p.kind)
-      if (!settlement && this.view.scale > 8) continue
-      if (p.kind === "hamlet" && this.view.scale > 12) continue
+      if (!settlement && s > 8) continue
+      if (p.kind === "hamlet" && s > 12) continue
+      if (p.kind === "village" && s > 40) continue
+      if (p.kind === "town" && s > 260) continue
       const [px, py] = this.toPixel(p.x, p.z)
       if (px < -50 || py < -20 || px > this.w + 50 || py > this.h + 20) continue
       ctx.font = settlement ? `bold ${p.kind === "hamlet" ? 11 : 13}px system-ui, sans-serif` : "italic 11px system-ui, sans-serif"
