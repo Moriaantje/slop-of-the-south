@@ -27,14 +27,20 @@ namespace :osm do
 
     widths = World::ROAD_WIDTHS.map { |k, w| "(#{conn.quote(k)}, #{w})" }.join(",")
     roads = conn.exec_update(<<~SQL)
-      INSERT INTO roads (osm_id, highway, name, width, oneway, geom, created_at, updated_at)
-      SELECT l.osm_id::bigint, l.highway, l.name, w.width, coalesce(l.other_tags LIKE '%"oneway"=>"yes"%', false), l.geom, now(), now()
+      INSERT INTO roads (osm_id, highway, name, width, oneway, surface, lanes, bridge, tunnel, geom, created_at, updated_at)
+      SELECT l.osm_id::bigint, l.highway, l.name, w.width, coalesce(l.other_tags LIKE '%"oneway"=>"yes"%', false),
+             substring(l.other_tags from '"surface"=>"([^"]+)"'),
+             NULLIF(substring(l.other_tags from '"lanes"=>"([0-9]+)"'), '')::int,
+             coalesce(l.other_tags LIKE '%"bridge"=>"%' AND l.other_tags NOT LIKE '%"bridge"=>"no"%', false),
+             coalesce(l.other_tags LIKE '%"tunnel"=>"%' AND l.other_tags NOT LIKE '%"tunnel"=>"no"%', false),
+             l.geom, now(), now()
       FROM osm_pbf_lines l
       JOIN (VALUES #{widths}) AS w(highway, width) ON w.highway = l.highway
       JOIN boundaries b ON b.name = 'Limburg' AND ST_DWithin(l.geom, b.geom, 1000)
       WHERE ST_GeometryType(l.geom) = 'ST_LineString' AND ST_NPoints(l.geom) >= 2
       ON CONFLICT (osm_id) DO UPDATE SET highway = EXCLUDED.highway, name = EXCLUDED.name, width = EXCLUDED.width,
-        oneway = EXCLUDED.oneway, geom = EXCLUDED.geom, updated_at = now()
+        oneway = EXCLUDED.oneway, surface = EXCLUDED.surface, lanes = EXCLUDED.lanes, bridge = EXCLUDED.bridge, tunnel = EXCLUDED.tunnel,
+        geom = EXCLUDED.geom, updated_at = now()
     SQL
     kinds = (Place::SETTLEMENTS + Place::DISTRICTS).map { conn.quote(_1) }.join(",")
     places = conn.exec_update(<<~SQL)

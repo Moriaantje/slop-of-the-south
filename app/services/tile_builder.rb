@@ -10,11 +10,13 @@ class TileBuilder
     s = World::TILE_SIZE
     x0, y0 = tx * s, ty * s
     meshes = meshes_for(tx, ty)
+    network = RoadBuilder.new(@heights).build(tx, ty)   # smoothed, pinned road profiles + terrain deformation
     {
       tx: tx, ty: ty,
       origin: World.to_game(x0, y0 + s),      # game-space corner (west, north)
-      heights: heights_for(x0, y0),
-      roads: roads_for(tx, ty),
+      heights: heights_for(x0, y0, network[:deform]),
+      roads: network[:roads],
+      junctions: network[:junctions],
       buildings: buildings_for(tx, ty, skip: meshes.map { _1[:id] }.to_set),
       meshes: meshes,
       trees: trees_for(tx, ty),
@@ -26,25 +28,20 @@ class TileBuilder
   private
 
   # Flat array, HEIGHT_N × HEIGHT_N, rows north→south, columns west→east.
-  def heights_for(x0, y0)
+  # `deform` (from RoadBuilder) seats the terrain under and beside roads.
+  def heights_for(x0, y0, deform = nil)
     n, step, s = World::HEIGHT_N, World::HEIGHT_STEP, World::TILE_SIZE
     out = Array.new(n * n)
     n.times do |row|
       y = y0 + s - row * step
       n.times do |col|
-        out[row * n + col] = @heights.sample(x0 + col * step, y).round(1)
+        x = x0 + col * step
+        h = @heights.sample(x, y)
+        h = deform.call(x, y, h) if deform
+        out[row * n + col] = h.round(2)
       end
     end
     out
-  end
-
-  def roads_for(tx, ty)
-    Road.in_tile(tx, ty).flat_map do |r|
-      lines_from(r["geojson"]).filter_map do |coords|
-        next if coords.size < 2
-        { kind: r["highway"], name: r["name"], width: r["width"], pts: coords.map { |x, y| World.to_game(x, y).map { _1.round(2) } } }
-      end
-    end
   end
 
   # Extruded boxes: OSM footprints and any 3D BAG parts whose building has no LoD2.2 mesh.

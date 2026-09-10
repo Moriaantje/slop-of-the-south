@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_10_000009) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_10_000011) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -82,13 +82,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_000009) do
     t.index ["osm_id"], name: "index_places_on_osm_id", unique: true
   end
 
+  create_table "road_surfaces", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "function"
+    t.geometry "geom", limit: {srid: 28992, type: "multi_polygon"}, null: false
+    t.string "layer", null: false
+    t.string "material"
+    t.string "source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["function"], name: "index_road_surfaces_on_function"
+    t.index ["geom"], name: "index_road_surfaces_on_geom", using: :gist
+    t.index ["source_id"], name: "index_road_surfaces_on_source_id", unique: true
+  end
+
   create_table "roads", force: :cascade do |t|
+    t.boolean "bridge", default: false, null: false
     t.datetime "created_at", null: false
     t.geometry "geom", limit: {srid: 28992, type: "line_string"}, null: false
     t.string "highway", null: false
+    t.integer "lanes"
     t.string "name"
     t.boolean "oneway", default: false, null: false
     t.bigint "osm_id", null: false
+    t.string "surface"
+    t.boolean "tunnel", default: false, null: false
     t.datetime "updated_at", null: false
     t.float "width", default: 5.5, null: false
     t.index ["geom"], name: "index_roads_on_geom", using: :gist

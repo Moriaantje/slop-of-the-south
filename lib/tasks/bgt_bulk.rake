@@ -43,7 +43,9 @@ namespace :bgt do
     FileUtils.mkdir_p(BULK_DIR)
     pending = {}
     BULK_MUNICIPALITIES.call.each do |name, wkt|
-      zip = BULK_DIR.join("#{name.tr(' ', '_')}.zip")
+      # extracts are named by municipality; a non-default type set gets a suffix (e.g. Beek-wegdeel.zip)
+      suffix = BULK_TYPES == %w[begroeidterreindeel onbegroeidterreindeel waterdeel vegetatieobject] ? "" : "-#{BULK_TYPES.join('+')}"
+      zip = BULK_DIR.join("#{name.tr(' ', '_')}#{suffix}.zip")
       next puts("#{name}: already downloaded") if zip.exist?
       res = BULK_JSON.call(:post, "/full/custom", { featuretypes: BULK_TYPES, format: "gmllight", geofilter: wkt })
       id = res["downloadRequestId"]
@@ -163,5 +165,52 @@ namespace :bgt do
       conn.execute("DROP TABLE " + layers.keys.map { "bulk_#{_1}" }.join(", "))
     end
     puts "land_covers: #{LandCover.group(:layer).count.inspect}; trees: #{Tree.count}"
+  end
+end
+
+namespace :bgt do
+  # Import the wegdeel extracts (bgt:bulk_fetch with BGT_BULK_TYPES=wegdeel,ondersteunendwegdeel) into road_surfaces.
+  desc "Import data/bgt/bulk/*-wegdeel+ondersteunendwegdeel.zip into road_surfaces"
+  task wegdeel_import: :environment do
+    conn = ActiveRecord::Base.connection
+    c = ActiveRecord::Base.connection_db_config.configuration_hash
+    pg = "PG:" + { dbname: c[:database], host: c[:host], port: c[:port], user: c[:username], password: c[:password] }.compact.map { |k, v| "#{k}=#{v}" }.join(" ")
+    zips = Dir[BULK_DIR.join("*-wegdeel+ondersteunendwegdeel.zip").to_s].sort
+    raise "no wegdeel extracts; run BGT_BULK_TYPES=wegdeel,ondersteunendwegdeel bin/rails bgt:bulk_fetch" if zips.empty?
+    layers = {
+      "bgt_wegdeel" => %(SELECT gml_id, "bgt-functie" AS function, "bgt-fysiekVoorkomen" AS material, eindRegistratie, objectEindTijd FROM Wegdeel),
+      "bgt_ondersteunendwegdeel" => %(SELECT gml_id, "bgt-functie" AS function, "bgt-fysiekVoorkomen" AS material, eindRegistratie, objectEindTijd FROM OndersteunendWegdeel)
+    }
+    first = true
+    zips.each_with_index do |zip, i|
+      dir = Pathname(zip).sub_ext("")
+      sh "unzip", "-oq", zip, "-d", dir.to_s, verbose: false unless dir.exist?
+      layers.each do |file, sql|
+        gml = dir.join("#{file}.gml")
+        next unless gml.exist?
+        sh "ogr2ogr", "-q", "-f", "PostgreSQL", pg, gml.to_s, (first ? "-overwrite" : "-append"), "-nln", "bulk_#{file}",
+           "-nlt", "PROMOTE_TO_MULTI", "-nlt", "CONVERT_TO_LINEAR", "-a_srs", "EPSG:28992", "-lco", "GEOMETRY_NAME=geom",
+           "-sql", sql, "--config", "GML_SKIP_RESOLVE_ELEMS", "ALL", verbose: false
+      end
+      first = false
+      print "\r#{i + 1}/#{zips.size} #{File.basename(zip, '.zip')}   "
+    end
+    puts
+    conn.transaction do
+      conn.execute("DELETE FROM road_surfaces")
+      { "bulk_bgt_wegdeel" => "wegdeel", "bulk_bgt_ondersteunendwegdeel" => "ondersteunend" }.each do |table, layer|
+        n = conn.exec_update(<<~SQL)
+          INSERT INTO road_surfaces (source_id, layer, function, material, geom, created_at, updated_at)
+          SELECT DISTINCT ON (gml_id) gml_id, '#{layer}', function, material, ST_Multi(ST_CollectionExtract(ST_MakeValid(geom), 3)), now(), now()
+          FROM #{table}
+          WHERE eindregistratie IS NULL AND objecteindtijd IS NULL AND NOT ST_IsEmpty(geom)
+          ORDER BY gml_id
+          ON CONFLICT (source_id) DO UPDATE SET layer = EXCLUDED.layer, function = EXCLUDED.function, material = EXCLUDED.material, geom = EXCLUDED.geom, updated_at = now()
+        SQL
+        puts "#{layer}: #{n} polygons"
+      end
+      conn.execute("DROP TABLE " + layers.keys.map { "bulk_#{_1}" }.join(", "))
+    end
+    puts "road_surfaces by function: " + conn.select_rows("SELECT function, count(*) FROM road_surfaces GROUP BY 1 ORDER BY 2 DESC").map { |f, n| "#{f}=#{n}" }.join(", ")
   end
 end

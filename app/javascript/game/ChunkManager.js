@@ -5,6 +5,7 @@ import { buildBuildings } from "game/Buildings"
 import { buildBuildingMeshes } from "game/BuildingMeshes"
 import { buildTrees } from "game/Trees"
 import { paintCover, buildWater } from "game/Cover"
+import { ROAD_LIFT } from "game/Roads"
 
 // Streams 500 m tiles in a square around the player and disposes the ones left behind.
 export class ChunkManager {
@@ -39,9 +40,12 @@ export class ChunkManager {
     return !!(t && !t.loading)
   }
 
+  // Height under (x, z): the road surface when on a road (roads are flat ribbons above the terrain), else the terrain.
   heightAt(x, z) {
     const t = this.tiles.get(this.tileIndex(x, z).join("_"))
-    return t && !t.loading ? t.terrain.heightAt(x, z) : 0
+    if (!t || t.loading) return 0
+    const road = roadHeight(t.roads, x, z)
+    return road ?? t.terrain.heightAt(x, z)
   }
   
   // Biome label of the tile under (x, z), for the HUD.
@@ -76,7 +80,7 @@ export class ChunkManager {
       group.add(terrain.mesh)
       const water = buildWater(data.cover ?? [], (x, z) => terrain.heightAt(x, z), data.origin)
       if (water) group.add(water)
-      const roads = buildRoads(data.roads, (x, z) => terrain.heightAt(x, z))
+      const roads = buildRoads(data.roads, data.junctions, data.biome)
       if (roads) group.add(roads)
       const buildings = buildBuildings(data.buildings)
       if (buildings) group.add(buildings)
@@ -100,4 +104,21 @@ export class ChunkManager {
       if (o.material && !o.material.__shared) { o.material.map?.dispose(); o.material.dispose() }
     })
   }
+}
+
+// y of the nearest road ribbon within its half-width, interpolated along the segment; null when off-road
+function roadHeight(roads, x, z) {
+  let best = null, bestD = Infinity
+  for (const road of roads ?? []) {
+    const hw = road.width / 2 + 0.3, pts = road.pts
+    for (let i = 1; i < pts.length; i++) {
+      const [ax, az, ay] = pts[i - 1], [bx, bz, by] = pts[i]
+      const dx = bx - ax, dz = bz - az
+      const len2 = dx * dx + dz * dz || 1
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2))
+      const d = Math.hypot(ax + dx * t - x, az + dz * t - z)
+      if (d <= hw && d < bestD) { bestD = d; best = ay + (by - ay) * t + ROAD_LIFT }
+    }
+  }
+  return best
 }

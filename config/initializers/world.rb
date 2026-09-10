@@ -35,14 +35,15 @@ module World
   def self.to_game(x, y) = [ x - ORIGIN_X, -(y - ORIGIN_Y) ]
 
   # Road widths (metres) by OSM highway tag
-  ROAD_WIDTHS = {
-    "motorway" => 11.0, "motorway_link" => 5.0,
-    "trunk" => 9.0, "trunk_link" => 5.0,
-    "primary" => 8.0, "primary_link" => 4.5,
-    "secondary" => 7.0, "secondary_link" => 4.5,
-    "tertiary" => 6.5, "tertiary_link" => 4.0,
-    "unclassified" => 5.5, "residential" => 5.5,
-    "living_street" => 4.5, "service" => 3.5
-  }.freeze
+ROAD_WIDTHS = {
+  "motorway" => 11.0, "motorway_link" => 5.0,
+  "trunk" => 9.0, "trunk_link" => 5.0,
+  "primary" => 8.0, "primary_link" => 4.5,
+  "secondary" => 7.0, "secondary_link" => 4.5,
+  "tertiary" => 6.5, "tertiary_link" => 4.0,
+  "unclassified" => 5.5, "residential" => 5.5,
+  "living_street" => 4.5, "service" => 3.5,
+  "cycleway" => 2.5, "track" => 3.0
+}.freeze
   HIGHWAY_TYPES = ROAD_WIDTHS.keys.freeze
 end
