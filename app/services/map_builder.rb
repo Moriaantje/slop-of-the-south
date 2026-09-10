@@ -58,6 +58,7 @@ class MapBuilder
       FROM roads WHERE geom && #{env} #{kind_sql}
     SQL
     rows.flat_map do |kind, width, name, geojson|
+      next [] unless geojson                      # ST_Simplify of an empty intersection is NULL
       g = JSON.parse(geojson)
       lines = case g["type"]
       when "LineString" then [ g["coordinates"] ]

@@ -22,12 +22,21 @@ WHERE NOT EXISTS (SELECT 1 FROM area) OR EXISTS (
 ORDER BY tx, ty
     SQL
 
+# WORKERS=n (default 4) forks n processes, each building every n-th tile
+workers = ENV.fetch("WORKERS", "4").to_i.clamp(1, 16)
+ActiveRecord::Base.connection_pool.disconnect!
+pids = workers.times.map do |w|
+  Process.fork do
     builder = TileBuilder.new
     rows.each_with_index do |(tx, ty), i|
+      next unless i % workers == w
       out.join("#{tx}_#{ty}.json").write(JSON.generate(builder.build(tx, ty)))
-      print "\r#{i + 1}/#{rows.size} tiles" if (i % 50).zero?
+      print "\r#{i + 1}/#{rows.size} tiles" if w.zero? && (i % 50).zero?
     end
-    puts "\nWrote #{rows.size} tiles to #{out}"
+  end
+end
+pids.each { |pid| Process.wait(pid) }
+puts "\nWrote #{rows.size} tiles to #{out} with #{workers} workers"
   end
 
   desc "Delete built tiles"

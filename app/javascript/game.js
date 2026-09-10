@@ -13,10 +13,11 @@ async function main() {
   const config = await (await fetch("/api/world")).json()
   const homeSpawn = { ...config.spawn }      // the world spawn, kept as the fallback when a URL spawn is outside the border
   // ?spawn=x,z[,yaw] teleports to game coordinates (handy for exploring the countryside)
+  let urlSpawn = false
   const spawnParam = new URLSearchParams(location.search).get("spawn")
   if (spawnParam) {
     const [x, z, yaw = 0] = spawnParam.split(",").map(Number)
-    if (Number.isFinite(x) && Number.isFinite(z)) config.spawn = { x, z, yaw }
+    if (Number.isFinite(x) && Number.isFinite(z)) { config.spawn = { x, z, yaw }; urlSpawn = true }
   }
   const container = document.getElementById("game")
   const playerId = container.dataset.playerId
@@ -46,7 +47,7 @@ async function main() {
   const timer = new THREE.Timer()
   let netTimer = 0, signTimer = 0, borderTimer = 0
   let placed = false          // car and camera snapped onto the terrain once the spawn tile is in
-  let snapToRoad = false      // after a map teleport: move onto the nearest street once its tile is in
+  let snapToRoad = urlSpawn   // after a map teleport or a ?spawn= URL: move onto the nearest street once its tile is in
 
   function frame(now) {
     timer.update(now)
