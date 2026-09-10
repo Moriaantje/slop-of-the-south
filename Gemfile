@@ -13,8 +13,8 @@ gem "pg", "~> 1.1"
 gem "puma", ">= 5.0"
 # PostGIS geometry columns and types [https://github.com/rgeo/activerecord-postgis-adapter]
 gem "activerecord-postgis-adapter"
-# Three.js bundling with Vite [https://vite-ruby.netlify.app]
-gem "vite_rails"
+# Use JavaScript with ESM import maps [https://github.com/rails/importmap-rails]
+gem "importmap-rails"
 
 # Use Active Model has_secure_password [https://guides.rubyonrails.org/active_model_basics.html#securepassword]
 # gem "bcrypt", "~> 3.1.7"

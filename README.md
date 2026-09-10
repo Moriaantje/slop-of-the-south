@@ -4,7 +4,7 @@ A multiplayer arcade driving game set in the Westelijke Mijnstreek (Sittard, Gel
 Stein, Urmond, Brunssum and everything in between), built from real geodata.
 
 Backend: Ruby on Rails 8.1 + PostgreSQL/PostGIS + Action Cable.
-Frontend: Three.js bundled with Vite (`vite_rails`).
+Frontend: Three.js as native ES modules via `importmap-rails` (no Node toolchain).
 
 ---
 
@@ -108,9 +108,9 @@ brew install postgresql postgis gdal      # or apt: postgresql postgis gdal-bin
 rails new mijnstreek-drive -d postgresql --skip-jbuilder
 cd mijnstreek-drive
 # copy the files from this scaffold over the generated app, then:
-bundle add activerecord-postgis-adapter vite_rails
-bundle exec vite install
-npm install three @rails/actioncable
+bundle add activerecord-postgis-adapter importmap-rails
+bin/rails importmap:install
+# three.js and its addons are vendored into vendor/javascript (see config/importmap.rb)
 ```
 
 Edit `config/database.yml` and set `adapter: postgis` for every environment.
@@ -124,20 +124,23 @@ bin/rails osm:import           # → PostGIS
 #   gdalwarp -t_srs EPSG:28992 -tr 10 10 -r bilinear -te 177000 323000 200000 340000 \
 #       ahn_*.tif data/dem.tif && gdal_translate -of AAIGrid data/dem.tif data/dem.asc
 bin/rails tiles:build          # → public/tiles/*.json  (flat terrain if no dem.asc)
-bin/dev                        # Rails + Vite
+bin/dev                        # Rails (Puma on :3000)
 ```
 
 Open http://localhost:3000 in two browser windows and drive.
 
 ### Local setup notes
 
-- Node is managed by mise; `.node-version` pins Node 24 so `bin/vite` and `npm` resolve inside the project.
-- `bin/dev` runs `Procfile.dev` through foreman (installed on first run): Puma on port 3000, Vite on 3036.
+- No Node needed: JavaScript is served as ES modules through `importmap-rails` and Propshaft. Imports use bare
+  specifiers (`game/World`, `three`, `three/addons/...`) that `config/importmap.rb` resolves; relative imports would
+  bypass the digested asset paths, so keep using bare specifiers.
+- Three.js is vendored by hand (single-file jsDelivr `+esm` bundle) because the jspm build that `bin/importmap pin`
+  downloads is split into chunk files. To add an addon, download it into `vendor/javascript` and pin it under
+  `three/addons/...` — see the comment in `config/importmap.rb`.
 - The `json` gem is pinned below 3.0 in the Gemfile: json 3.x made `JSON.parse` keyword-only, and Rails 8.1.3 still
   passes a positional options hash when reading signed cookies. Remove the pin once Rails ships the fix.
 - `config/cable.yml` uses the `async` adapter in development (Rails default, in-process, fine for one server process)
   and Solid Cable in production.
 - Tiles are requested from `public/tiles/` first and fall back to `/api/tiles/:tx/:ty`, which builds the tile and caches it
   on disk, so an empty database yields a flat 40 m NAP world and a 404 per tile in the dev log on first load.
-
 Controls: W/↑ accelerate, S/↓ brake/reverse, A/D or ←/→ steer, Space handbrake, R reset to road.

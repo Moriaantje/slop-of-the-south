@@ -1,10 +1,10 @@
 import * as THREE from "three"
-import { World } from "../game/World.js"
-import { ChunkManager } from "../game/ChunkManager.js"
-import { Vehicle } from "../game/Vehicle.js"
-import { Input } from "../game/Input.js"
-import { Network } from "../game/Network.js"
-import { RemoteCars } from "../game/RemoteCars.js"
+import { World } from "game/World"
+import { ChunkManager } from "game/ChunkManager"
+import { Vehicle } from "game/Vehicle"
+import { Input } from "game/Input"
+import { Network } from "game/Network"
+import { RemoteCars } from "game/RemoteCars"
 
 async function main() {
   const config = await (await fetch("/api/world")).json()

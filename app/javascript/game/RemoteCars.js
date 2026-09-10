@@ -1,5 +1,5 @@
 import * as THREE from "three"
-import { makeCarMesh } from "./Vehicle.js"
+import { makeCarMesh } from "game/Vehicle"
 
 const DELAY_MS = 120         // render slightly in the past so we can interpolate
 const TIMEOUT_MS = 6000

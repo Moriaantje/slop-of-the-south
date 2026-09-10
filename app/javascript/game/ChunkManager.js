@@ -1,7 +1,7 @@
 import * as THREE from "three"
-import { TerrainTile } from "./TerrainTile.js"
-import { buildRoads } from "./Roads.js"
-import { buildBuildings } from "./Buildings.js"
+import { TerrainTile } from "game/TerrainTile"
+import { buildRoads } from "game/Roads"
+import { buildBuildings } from "game/Buildings"
 
 // Streams 500 m tiles in a square around the player and disposes the ones left behind.
 export class ChunkManager {
