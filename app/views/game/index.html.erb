@@ -9,6 +9,8 @@
     </div>
     <%# Plaatsnaambord for the town or village %>
     <div id="sign-place" class="bord bord-plaats" hidden></div>
+    <%# biome of the current tile (stad, woonwijk, akkerland, weiland, boomgaarden, bos, water …) %>
+    <div id="biome"></div>
     <div id="players"></div>
   </div>
   <div id="speed"><span id="kmh">0</span><small>km/h</small></div>
@@ -33,7 +35,9 @@
   .bord-wijk { font-size: 12px; font-weight: 500; letter-spacing: .16em; opacity: .95; margin-bottom: 4px; }
   .bord-wijk:empty { display: none; }
   .bord-plaats { font-size: 16px; padding: 7px 16px 8px; }
-  #players { font-size: 14px; background: rgba(255, 255, 255, .6); padding: 3px 9px; border-radius: 4px; }
+  #players, #biome { font-size: 14px; background: rgba(255, 255, 255, .6); padding: 3px 9px; border-radius: 4px; }
+  #biome { font-style: italic; text-transform: capitalize; }
+  #biome:empty { display: none; }
   #players:empty { display: none; }
 
   #speed { position: absolute; right: 28px; bottom: 24px; text-align: right;

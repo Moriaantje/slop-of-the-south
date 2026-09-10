@@ -1,11 +1,11 @@
 import * as THREE from "three"
 
-const material = new THREE.MeshStandardMaterial({ color: 0x7fa15a, roughness: 1 })
-material.__shared = true
+const plain = new THREE.MeshStandardMaterial({ color: 0x7fa15a, roughness: 1 })   // tiles without land cover
+plain.__shared = true
 
 // Heightmap (rows north→south, columns west→east) → displaced plane, plus bilinear sampling.
 export class TerrainTile {
-  constructor(data, cfg) {
+  constructor(data, cfg, texture = null) {
     this.ox = data.origin[0]            // west edge (game x)
     this.oz = data.origin[1]            // north edge (game z)
     this.n = cfg.height_n
@@ -19,6 +19,8 @@ export class TerrainTile {
     for (let i = 0; i < pos.count; i++) pos.setY(i, this.h[i])
     geo.computeVertexNormals()
 
+    // per-tile material when a land cover texture is painted (disposed with the tile), else the shared green
+    const material = texture ? new THREE.MeshStandardMaterial({ map: texture, roughness: 1 }) : plain
     this.mesh = new THREE.Mesh(geo, material)
     this.mesh.position.set(this.ox + this.size / 2, 0, this.oz + this.size / 2)
   }

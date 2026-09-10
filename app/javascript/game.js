@@ -9,6 +9,12 @@ import { Locator } from "game/Locator"
 
 async function main() {
   const config = await (await fetch("/api/world")).json()
+  // ?spawn=x,z[,yaw] teleports to game coordinates (handy for exploring the countryside)
+  const spawnParam = new URLSearchParams(location.search).get("spawn")
+  if (spawnParam) {
+    const [x, z, yaw = 0] = spawnParam.split(",").map(Number)
+    if (Number.isFinite(x) && Number.isFinite(z)) config.spawn = { x, z, yaw }
+  }
   const container = document.getElementById("game")
   const playerId = container.dataset.playerId
 
@@ -26,6 +32,7 @@ async function main() {
   const playersEl = document.getElementById("players")
   const signEl = document.getElementById("sign"), streetEl = document.getElementById("sign-street")
   const districtEl = document.getElementById("sign-district"), placeEl = document.getElementById("sign-place")
+  const biomeEl = document.getElementById("biome")
   const timer = new THREE.Timer()
   let netTimer = 0, signTimer = 0
   let placed = false          // car and camera snapped onto the terrain once the spawn tile is in
@@ -60,6 +67,7 @@ async function main() {
       signEl.hidden = !locator.street
       placeEl.textContent = locator.place ?? ""
       placeEl.hidden = !locator.place
+      biomeEl.textContent = chunks.biomeAt(car.x, car.z) ?? ""
     }
     
     kmh.textContent = Math.round(Math.abs(car.speed) * 3.6)

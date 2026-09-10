@@ -17,7 +17,9 @@ class TileBuilder
       roads: roads_for(tx, ty),
       buildings: buildings_for(tx, ty, skip: meshes.map { _1[:id] }.to_set),
       meshes: meshes,
-      trees: trees_for(tx, ty)
+      trees: trees_for(tx, ty),
+      cover: cover_for(tx, ty, x0, y0 + s),
+      biome: LandCover.biome(LandCover.shares_in_tile(tx, ty))
     }
   end
 
@@ -107,6 +109,23 @@ class TileBuilder
       gx, gz = World.to_game(x, y)
       [ gx.round(1), gz.round(1), kind, h.round(1) ]
     end
+  end
+
+  # Land cover polygons clipped to the tile: [code, outer_ring, hole_ring, ...] with rings as flat decimetre
+  # offsets [dx, dz, ...] from the tile origin (west, north), so 0..5000 across the tile. Painted onto the terrain.
+  def cover_for(tx, ty, x0, y1)
+    LandCover.in_tile(tx, ty).flat_map do |code, polys|
+      polys.filter_map do |rings|
+        rings = rings.map { |ring| ring_dm(ring, x0, y1) }.reject { _1.size < 6 }
+        next if rings.empty?
+        [ code, *rings ]
+      end
+    end
+  end
+
+  def ring_dm(ring, x0, y1)
+    pts = ring.first == ring.last ? ring[0...-1] : ring
+    pts.flat_map { |x, y| [ ((x - x0) * 10).round, ((y1 - y) * 10).round ] }
   end
 
   def lines_from(geojson)

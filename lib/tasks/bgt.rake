@@ -6,7 +6,7 @@ namespace :bgt do
   BGT_API = ENV.fetch("BGT_API_URL", "https://api.pdok.nl/lv/bgt/ogc/v1")
   BGT_DIR = Rails.root.join("data", "bgt")
   BGT_CRS = "http://www.opengis.net/def/crs/EPSG/0/28992"
-  BGT_COLLECTIONS = ENV.fetch("BGT_COLLECTIONS", "vegetatieobject_punt,begroeidterreindeel").split(",")
+  BGT_COLLECTIONS = ENV.fetch("BGT_COLLECTIONS", "vegetatieobject_punt,begroeidterreindeel,onbegroeidterreindeel,waterdeel").split(",")
 
   # woodland types that get trees scattered into them, with tree spacing (m² per tree) and height range
   BGT_WOODS = {
@@ -76,7 +76,7 @@ namespace :bgt do
     end
   end
 
-  desc "Import BGT trees: vegetatieobject_punt (boom) as-is, woodland polygons filled with scattered trees"
+  desc "Import BGT: trees (registered + scattered in woods + orchard lattices) and land cover (terrain, pavement, water)"
   task import: :environment do
     conn = ActiveRecord::Base.connection
     current = ->(f) { f["properties"]["eind_registratie"].nil? }   # skip historical versions
@@ -123,8 +123,46 @@ namespace :bgt do
         end
       end
     end
-    puts "Imported #{trees} registered trees and #{scattered} scattered trees in #{woods} woods; trees now: #{Tree.count}"
+  puts "Imported #{trees} registered trees and #{scattered} scattered trees in #{woods} woods; trees now: #{Tree.count}"
+
+  # Land cover: vegetated + unvegetated terrain and water, as MultiPolygons
+  covers = orchards = fruit = 0
+  conn.transaction do
+    { "begroeidterreindeel" => "begroeid", "onbegroeidterreindeel" => "onbegroeid", "waterdeel" => "water" }.each do |collection, layer|
+      Dir[BGT_DIR.join(collection, "page-*.json").to_s].each do |file|
+        JSON.parse(File.read(file))["features"].each do |f|
+          next unless current.call(f) && %w[Polygon MultiPolygon].include?(f["geometry"]["type"])
+          props = f["properties"]
+          kind = layer == "water" ? (props["plus_type"] || props["type"]) : props["fysiek_voorkomen"]
+          next if kind.blank? || (layer == "water" && kind.start_with?("greppel"))   # dry ditches are not water
+          conn.transaction(requires_new: true) do
+            conn.exec_query(<<~SQL, "cover", [ props["lokaal_id"], layer, kind, f["geometry"].to_json ])
+              INSERT INTO land_covers (source_id, layer, kind, geom, created_at, updated_at)
+              VALUES ($1, $2, $3, ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($4), 28992)), 3)), now(), now())
+              ON CONFLICT (source_id) DO UPDATE SET layer = EXCLUDED.layer, kind = EXCLUDED.kind, geom = EXCLUDED.geom, updated_at = now()
+            SQL
+            covers += 1
+            # hoogstamboomgaard: fruit trees on a 9 m lattice inside the orchard
+            if kind == "fruitteelt"
+              orchards += 1
+              fruit += conn.exec_update(<<~SQL, "orchard", [ f["geometry"].to_json, props["lokaal_id"] ])
+                WITH g AS (SELECT ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($1), 28992)) AS geom),
+                     pts AS (SELECT ST_Centroid(c.geom) AS p, row_number() OVER () AS n
+                             FROM g, LATERAL ST_SquareGrid(9, g.geom) AS c WHERE ST_Within(ST_Centroid(c.geom), g.geom))
+                INSERT INTO trees (source, source_id, kind, height, geom, created_at, updated_at)
+                SELECT 'bgt_boomgaard', $2::text || '/' || n, 'fruitteelt', 4.5 + 2 * random(), p, now(), now() FROM pts
+                ON CONFLICT (source, source_id) DO UPDATE SET geom = EXCLUDED.geom, updated_at = now()
+              SQL
+            end
+          end
+        rescue ActiveRecord::StatementInvalid => e
+          warn "skip #{collection} #{f.dig("properties", "lokaal_id")}: #{e.message.lines.first}"
+        end
+      end
+    end
   end
+  puts "Imported #{covers} land cover polygons; #{fruit} fruit trees in #{orchards} orchards; land_covers now: #{LandCover.group(:layer).count.inspect}"
+end
 
   desc "Delete downloaded BGT pages"
   task clean: :environment do

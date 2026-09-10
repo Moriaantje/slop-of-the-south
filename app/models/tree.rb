@@ -1,6 +1,6 @@
 class Tree < ApplicationRecord
-  # tile kinds: 0 street/park tree (deciduous), 1 deciduous wood, 2 conifer
-  TILE_KIND = { "boom" => 0, "loofbos" => 1, "gemengd bos" => 1, "houtwal" => 1, "naaldbos" => 2 }.freeze
+  # tile kinds: 0 street/park tree (deciduous), 1 deciduous wood, 2 conifer, 3 fruit tree (hoogstam orchard)
+  TILE_KIND = { "boom" => 0, "loofbos" => 1, "gemengd bos" => 1, "houtwal" => 1, "naaldbos" => 2, "fruitteelt" => 3 }.freeze
 
   validates :source, :source_id, :kind, :height, :geom, presence: true
 

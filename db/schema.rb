@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_10_000007) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_10_000008) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -46,6 +46,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_000007) do
     t.index ["geom"], name: "index_buildings_on_geom", using: :gist
     t.index ["source", "source_id"], name: "index_buildings_on_source_and_source_id", unique: true
     t.index ["source"], name: "index_buildings_on_source"
+  end
+
+  create_table "land_covers", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.geometry "geom", limit: {srid: 28992, type: "multi_polygon"}, null: false
+    t.string "kind", null: false
+    t.string "layer", null: false
+    t.string "source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geom"], name: "index_land_covers_on_geom", using: :gist
+    t.index ["layer"], name: "index_land_covers_on_layer"
+    t.index ["source_id"], name: "index_land_covers_on_source_id", unique: true
   end
 
   create_table "places", force: :cascade do |t|

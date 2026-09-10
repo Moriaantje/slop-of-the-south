@@ -7,17 +7,18 @@ import * as THREE from "three"
 const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, side: THREE.DoubleSide })
 material.__shared = true
 
-const VARIANTS = { 0: 6, 1: 4, 2: 3 }
-const BARK = { 0: 0x5b4634, 1: 0x4e3d30, 2: 0x4a3226 }
+const VARIANTS = { 0: 6, 1: 4, 2: 3, 3: 3 }
+const BARK = { 0: 0x5b4634, 1: 0x4e3d30, 2: 0x4a3226, 3: 0x5a4331 }
 const LEAVES = {
   0: [0x5d8f45, 0x6a9a4a, 0x7fa64f, 0x8fa943, 0x578a3e],
   1: [0x3f6f33, 0x477a3b, 0x4f8541, 0x386428],
-  2: [0x2f5a35, 0x2a5030, 0x34633a]
+  2: [0x2f5a35, 0x2a5030, 0x34633a],
+  3: [0x6c9a46, 0x76a24c, 0x81a952]                              // hoogstam fruit trees
 }
 const ICO = new THREE.IcosahedronGeometry(1, 0).attributes.position   // 20-face leaf cluster template
 
 const geometries = {}
-for (const kind of [0, 1, 2]) geometries[kind] = Array.from({ length: VARIANTS[kind] }, (_, i) => buildVariant(kind, 1000 * (kind + 1) + 7 * i))
+for (const kind of [0, 1, 2, 3]) geometries[kind] = Array.from({ length: VARIANTS[kind] }, (_, i) => buildVariant(kind, 1000 * (kind + 1) + 7 * i))
 
 export function buildTrees(trees, heightAt) {
   if (!trees?.length) return null
@@ -26,16 +27,16 @@ export function buildTrees(trees, heightAt) {
     const kind = t[2] ?? 1
     const variant = Math.floor(rand(t[0], t[1]) * VARIANTS[kind])
     const key = kind * 10 + variant
-    if (!groups.has(key)) groups.set(key, { geo: geometries[kind][variant], list: [] })
+    if (!groups.has(key)) groups.set(key, { geo: geometries[kind][variant], list: [], kind })
     groups.get(key).list.push(t)
   }
   const group = new THREE.Group()
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0)
   const color = new THREE.Color()
-  for (const { geo, list } of groups.values()) {
+  for (const { geo, list, kind } of groups.values()) {
     const mesh = new THREE.InstancedMesh(geo, material, list.length)
     list.forEach(([x, z, , h], i) => {
-      const spin = rand(z, x), width = 0.85 + 0.3 * rand(x + 1, z), tint = 0.85 + 0.3 * rand(x, z + 1)
+      const spin = rand(z, x), width = (kind === 3 ? 1.35 : 1) * (0.85 + 0.3 * rand(x + 1, z)), tint = 0.85 + 0.3 * rand(x, z + 1)
       q.setFromAxisAngle(up, spin * Math.PI * 2)
       s.set(h * width, h, h * width)                           // geometry is 1 unit tall
       mesh.setMatrixAt(i, m.compose(p.set(x, heightAt(x, z) - 0.15, z), q, s))
@@ -57,6 +58,7 @@ function buildVariant(kind, seed) {
   const bark = new THREE.Color(BARK[kind])
   const leaf = new THREE.Color(LEAVES[kind][Math.floor(rnd() * LEAVES[kind].length)])
   if (kind === 2) conifer(out, rnd, bark, leaf)
+  else if (kind === 3) branch(out, rnd, new THREE.Vector3(), new THREE.Vector3(0, 1, 0), 0.42, 0.05, 0, 2, 0.2, bark, leaf)   // short trunk, broad crown
   else branch(out, rnd, new THREE.Vector3(), new THREE.Vector3(0, 1, 0), kind === 0 ? 0.36 : 0.3, 0.035, 0, kind === 0 ? 3 : 2, kind === 0 ? 0.11 : 0.17, bark, leaf)
 
   let maxY = 0

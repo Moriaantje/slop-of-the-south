@@ -4,6 +4,7 @@ import { buildRoads } from "game/Roads"
 import { buildBuildings } from "game/Buildings"
 import { buildBuildingMeshes } from "game/BuildingMeshes"
 import { buildTrees } from "game/Trees"
+import { paintCover, buildWater } from "game/Cover"
 
 // Streams 500 m tiles in a square around the player and disposes the ones left behind.
 export class ChunkManager {
@@ -43,6 +44,12 @@ export class ChunkManager {
     return t && !t.loading ? t.terrain.heightAt(x, z) : 0
   }
   
+  // Biome label of the tile under (x, z), for the HUD.
+  biomeAt(x, z) {
+    const t = this.tiles.get(this.tileIndex(x, z).join("_"))
+    return t && !t.loading ? t.biome : null
+  }
+
   // Road polylines of the tile under (x, z) and its eight neighbours, for the street sign.
   roadsAround(x, z) {
     const [cx, cy] = this.tileIndex(x, z)
@@ -64,9 +71,11 @@ export class ChunkManager {
       const data = await res.json()
       if (!this.tiles.has(key)) return                          // player already moved away
 
-      const terrain = new TerrainTile(data, this.cfg)
+      const terrain = new TerrainTile(data, this.cfg, data.cover?.length ? paintCover(data.cover) : null)
       const group = new THREE.Group()
       group.add(terrain.mesh)
+      const water = buildWater(data.cover ?? [], (x, z) => terrain.heightAt(x, z), data.origin)
+      if (water) group.add(water)
       const roads = buildRoads(data.roads, (x, z) => terrain.heightAt(x, z))
       if (roads) group.add(roads)
       const buildings = buildBuildings(data.buildings)
@@ -76,7 +85,7 @@ export class ChunkManager {
       const trees = buildTrees(data.trees, (x, z) => terrain.heightAt(x, z))
       if (trees) group.add(trees)
       this.scene.add(group)
-      this.tiles.set(key, { group, terrain, roads: data.roads })
+      this.tiles.set(key, { group, terrain, roads: data.roads, biome: data.biome })
     } catch (e) {
       console.warn(e)
       this.tiles.delete(key)
@@ -88,7 +97,7 @@ export class ChunkManager {
     t.group.traverse((o) => {
       if (o.isInstancedMesh) o.dispose()                                   // instance buffers
       if (o.geometry && !o.geometry.__shared) o.geometry.dispose()
-      if (o.material && !o.material.__shared) o.material.dispose()
+      if (o.material && !o.material.__shared) { o.material.map?.dispose(); o.material.dispose() }
     })
   }
 }

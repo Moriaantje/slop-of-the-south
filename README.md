@@ -44,6 +44,7 @@ Game space is RD minus a fixed origin so floats stay small:
 | Buildings | **3D BAG** (3dbag.nl, TU Delft, CC BY 4.0) | LoD2.2 surfaces: the real roof planes and walls per building (`building_meshes`, ~12 faces per house), triangulated on the client. LoD1.3 parts are imported too as a fallback for the few buildings without a LoD2.2 model. `rake bag3d:fetch bag3d:import` downloads the GeoPackage tiles and loads them with `ogr2ogr`. |
 | Buildings (fallback) | OpenStreetMap footprints | Only used where no 3D BAG building overlaps, i.e. across the German border. `height` / `building:levels` tags, fallback 6 m. |
 | Place names | OpenStreetMap `place=*` nodes (towns, villages, wijken) | Drive the HUD street sign (nearest named road + nearest place) |
+| Land cover & water | **BGT** `begroeidterreindeel` (meadows, arable fields, orchards, woods, lawns), `onbegroeidterreindeel` (yards, pavement), `waterdeel` | Painted per tile into a 512 px terrain texture (fields keep a stable colour per polygon); water is also drawn as a draped skin. Area shares classify each tile into a biome: water, stad, woonwijk, dorp, bos, boomgaarden, akkerland, weiland, platteland (`LandCover.biome`). Orchards get hoogstam fruit trees on a 9 m lattice. |
 | Trees | **BGT** (Basisregistratie Grootschalige Topografie) via PDOK OGC API Features | `vegetatieobject_punt` gives every registered tree (`plus_type = boom`); woodland polygons from `begroeidterreindeel` (loofbos, naaldbos, gemengd bos, houtwal) are filled with deterministically scattered trees (`ST_GeneratePoints`). `rake bgt:fetch bgt:import`. |
 | Terrain | **AHN** (Actueel Hoogtebestand Nederland) DTM via PDOK WCS | OSM has no elevation. AHN is 0.5 m lidar; the WCS resamples it to the 10 m grid on request, `gdal_fillnodata` fills the holes under buildings and water. Zuid-Limburg is genuinely hilly — 27 m at the Maas to 114 m on the plateau within the phase-1 box. |
 
@@ -61,7 +62,9 @@ in the game's about screen.
                                             ├── roads[]          {kind, width, pts}
                                             ├── buildings[]      {base, height, footprint}   (OSM / fallback boxes)
                                             ├── meshes[]         {id, roof, o, f: [[label, ring…]…]} (3D BAG LoD2.2 faces, cm offsets)
-                                            └── trees[]          [x, z, kind, height]   (BGT; kind 0 street tree, 1 broadleaf wood, 2 conifer)
+                                            ├── trees[]          [x, z, kind, height]   (BGT; kind 0 street tree, 1 broadleaf wood, 2 conifer, 3 fruit tree)
+                                            ├── cover[]          [code, ring…]          (BGT land cover, dm offsets from the tile corner; painted)
+                                            └── biome            "akkerland" | "woonwijk" | …
 
 Tiles are static JSON served by nginx/Rails' static file server — no DB hit while playing.
 
@@ -85,6 +88,7 @@ Tiles are static JSON served by nginx/Rails' static file server — no DB hit wh
     game/Roads.js            polylines → draped ribbons
     game/Buildings.js        footprints → extruded, merged meshes (OSM / fallback)
     game/BuildingMeshes.js   3D BAG LoD2.2 faces → triangulated, flat-shaded meshes
+    game/Cover.js            land cover → per-tile canvas texture on the terrain; water polygons → draped skins
     game/Trees.js            procedural branching trees, a few seeded variants per kind, instanced per tile;
                              variant, rotation, width and tint come from the tree position, so every tree is stable
     game/Locator.js          nearest named road + nearest place for the street sign
@@ -102,7 +106,7 @@ Tiles are static JSON served by nginx/Rails' static file server — no DB hit wh
 5. **Feel** — sound, skid marks, better car model, day/night, collisions with buildings.
 6. **Game** — checkpoints between the villages, time trials, leaderboards (Solid Queue jobs),
    maybe a "deliver the vlaai" delivery mode.
-7. **Scale** — full bounding box, water (Maas, Julianakanaal). *(trees done via BGT)*
+7. **Scale** — full bounding box (WORLD_BBOX=full for every fetch task); the Maas and Julianakanaal lie just outside the phase-1 box. *(trees, water, land cover done via BGT)*
 
 ---
 
@@ -128,8 +132,8 @@ bin/rails osm:fetch            # Overpass → data/osm/*.json  (phase-1 box, ~1�
 bin/rails osm:import           # → PostGIS
 bin/rails bag3d:fetch          # 3D BAG GeoPackage tiles for the box → data/bag3d/tiles (~160 MB for phase 1)
 bin/rails bag3d:import         # → PostGIS buildings (source bag3d); needs GDAL
-bin/rails bgt:fetch            # BGT trees + vegetated areas → data/bgt (paged GeoJSON, ~400 MB for phase 1)
-bin/rails bgt:import           # → PostGIS trees (registered trees + scattered woodland trees)
+bin/rails bgt:fetch            # BGT trees, terrain, pavement, water → data/bgt (paged GeoJSON, ~1 GB for phase 1)
+bin/rails bgt:import           # → PostGIS trees (registered, woodland, orchards) and land_covers
 # real terrain (needs GDAL: brew install gdal):
 bin/rails dem:fetch            # AHN terrain model from PDOK WCS → data/dem_raw.tif (10 m, ~1 min)
 bin/rails dem:build            # fill holes, convert → data/dem.asc
