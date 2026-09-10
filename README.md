@@ -137,6 +137,9 @@ Open http://localhost:3000 in two browser windows and drive.
 - Three.js is vendored by hand (single-file jsDelivr `+esm` bundle) because the jspm build that `bin/importmap pin`
   downloads is split into chunk files. To add an addon, download it into `vendor/javascript` and pin it under
   `three/addons/...` — see the comment in `config/importmap.rb`.
+- `osm:fetch` retries with backoff when the public Overpass server answers 429/504 (common). Set `OVERPASS_URL`
+  to use a mirror, e.g. `OVERPASS_URL=https://maps.mail.ru/osm/tools/overpass/api/interpreter bin/rails osm:fetch`.
+  Downloads are cached per cell in `data/osm/`, so rerunning only fetches what is missing.
 - The `json` gem is pinned below 3.0 in the Gemfile: json 3.x made `JSON.parse` keyword-only, and Rails 8.1.3 still
   passes a positional options hash when reading signed cookies. Remove the pin once Rails ships the fix.
 - `config/cable.yml` uses the `async` adapter in development (Rails default, in-process, fine for one server process)

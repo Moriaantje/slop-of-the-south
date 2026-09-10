@@ -6,8 +6,9 @@ module Api
         tile_size: World::TILE_SIZE,
         height_step: World::HEIGHT_STEP,
         height_n: World::HEIGHT_N,
-        # Spawn in game units, roughly Geleen station (RD ≈ 185900, 331680). Tune once tiles exist.
-        spawn: { x: 900, z: -1680, yaw: 0 }
+        # Spawn in game units: on Rijksweg Noord in Geleen (RD ≈ 186293, 331407), facing north-north-east
+        # towards Sittard. yaw is radians, 0 = north, positive turns left; see Vehicle.js.
+        spawn: { x: 1293.2, z: -1406.9, yaw: -0.611 }
       }
     end
   end
