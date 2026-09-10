@@ -84,7 +84,7 @@ export function buildRoads(roads, junctions, biome) {
   }
   for (const [x, z, y, r] of junctions ?? []) {
     const g = new THREE.CircleGeometry(r, 16).toNonIndexed()
-    g.rotateX(-Math.PI / 2); g.translate(x, y + 0.01, z)
+    g.rotateX(-Math.PI / 2); g.translate(x, y + LIFT + 0.01, z)   // level with the ribbons, not the terrain bed
     g.deleteAttribute("normal")                 // ribbons carry position + uv only; normals are computed after merging
     g.deleteAttribute("uv"); g.setAttribute("uv", new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2).fill(0.5), 2))
     add(junctionMat, g)
