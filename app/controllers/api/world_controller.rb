@@ -12,7 +12,9 @@ module Api
         # Towns, villages and districts (game units) for the street sign
         places: Place.for_client,
         # play area in RD metres [x0, y0, x1, y1] (the minimap shows this when expanded)
-        bounds: World.bounds_rd
+        bounds: World.bounds_rd,
+        # province border rings in game units: outside them is a wall of flames
+        border: Boundary.rings_for_client
       }
     end
   end

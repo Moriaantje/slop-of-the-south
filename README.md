@@ -45,6 +45,7 @@ Game space is RD minus a fixed origin so floats stay small:
 | Buildings (fallback) | OpenStreetMap footprints | Only used where no 3D BAG building overlaps, i.e. across the German border. `height` / `building:levels` tags, fallback 6 m. |
 | Place names | OpenStreetMap `place=*` nodes (towns, villages, wijken) | Drive the HUD street sign (nearest named road + nearest place) |
 | Land cover & water | **BGT** `begroeidterreindeel` (meadows, arable fields, orchards, woods, lawns), `onbegroeidterreindeel` (yards, pavement), `waterdeel` | Painted per tile into a 512 px terrain texture (fields keep a stable colour per polygon); water is also drawn as a draped skin. Area shares classify each tile into a biome: water, stad, woonwijk, dorp, bos, boomgaarden, akkerland, weiland, platteland (`LandCover.biome`). Orchards get hoogstam fruit trees on a 9 m lattice. |
+| Province border | **Bestuurlijke Gebieden** (Kadaster) via PDOK OGC API Features, `provinciegebied` | `rake border:fetch` stores the Limburg polygon; `/api/world` serves it simplified to 25 m. Outside it the world is a wall of flames (`game/FlameWall.js`); crossing it burns you back to your last position inside. |
 | Trees | **BGT** (Basisregistratie Grootschalige Topografie) via PDOK OGC API Features | `vegetatieobject_punt` gives every registered tree (`plus_type = boom`); woodland polygons from `begroeidterreindeel` (loofbos, naaldbos, gemengd bos, houtwal) are filled with deterministically scattered trees (`ST_GeneratePoints`). `rake bgt:fetch bgt:import`. |
 | Terrain | **AHN** (Actueel Hoogtebestand Nederland) DTM via PDOK WCS | OSM has no elevation. AHN is 0.5 m lidar; the WCS resamples it to the 10 m grid on request, `gdal_fillnodata` fills the holes under buildings and water. Zuid-Limburg is genuinely hilly — 27 m at the Maas to 114 m on the plateau within the phase-1 box. |
 
@@ -93,6 +94,7 @@ Tiles are static JSON served by nginx/Rails' static file server — no DB hit wh
     game/Trees.js            procedural branching trees, a few seeded variants per kind, instanced per tile;
                              variant, rotation, width and tint come from the tree position, so every tree is stable
     game/Locator.js          nearest named road + nearest place for the street sign
+    game/FlameWall.js        animated fire curtain along the province border; even-odd inside test for the burn-back
     game/Minimap.js          map drawn from our own data (MapBuilder → public/map): overview + 1 km detail cells;
                              M expands, drag pans, wheel zooms, F fits the bounds, click teleports
     game/Vehicle.js          arcade bicycle-model car physics
@@ -142,6 +144,7 @@ bin/rails dem:fetch            # AHN terrain model from PDOK WCS → data/dem_ra
 bin/rails dem:build            # fill holes, convert → data/dem.asc
 bin/rails tiles:build          # → public/tiles/*.json  (flat terrain if no dem.asc)
 bin/rails map:build            # → public/map/overview.json + 1 km cells for the minimap (also built on demand)
+bin/rails border:fetch         # Limburg province polygon (PDOK) → boundaries table; the edge of the world
 bin/dev                        # Rails (Puma on :3000)
 ```
 

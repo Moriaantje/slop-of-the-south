@@ -163,6 +163,7 @@ export class Minimap {
     for (const c of cells) this.drawRoads(c.roads, s < 2.5)
     if (s < 4) for (const c of cells) this.drawBuildings(c.buildings)
     if (s < 1.8) for (const c of cells) this.drawTrees(c.trees)
+    this.drawBorder()
     if (this.expanded) this.drawLabels()
     this.drawCars()
     if (this.expanded) this.drawChrome()
@@ -253,6 +254,15 @@ export class Minimap {
       ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.strokeText(p.name, px, py)
       ctx.fillStyle = settlement ? "#222" : "#555"; ctx.fillText(p.name, px, py)
     }
+  }
+
+  // the province border: outside it the world is on fire
+  drawBorder() {
+    if (!this.cfg.border?.length) return
+    const { ctx } = this
+    ctx.strokeStyle = "#e0401a"; ctx.lineWidth = this.expanded ? 3 : 2; ctx.setLineDash([6, 4])
+    for (const ring of this.cfg.border) { ctx.beginPath(); this.path(ring); ctx.closePath(); ctx.stroke() }
+    ctx.setLineDash([])
   }
 
   drawCars() {

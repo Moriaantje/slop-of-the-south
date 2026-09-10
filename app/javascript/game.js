@@ -7,9 +7,11 @@ import { Network } from "game/Network"
 import { RemoteCars } from "game/RemoteCars"
 import { Locator, nearestPointOnRoads } from "game/Locator"
 import { Minimap } from "game/Minimap"
+import { FlameWall } from "game/FlameWall"
 
 async function main() {
   const config = await (await fetch("/api/world")).json()
+  const homeSpawn = { ...config.spawn }      // the world spawn, kept as the fallback when a URL spawn is outside the border
   // ?spawn=x,z[,yaw] teleports to game coordinates (handy for exploring the countryside)
   const spawnParam = new URLSearchParams(location.search).get("spawn")
   if (spawnParam) {
@@ -31,6 +33,10 @@ async function main() {
   })
 
   world.scene.add(car.mesh)
+  const wall = config.border?.length ? new FlameWall(config.border) : null
+  if (wall) world.scene.add(wall.mesh)
+  const burnEl = document.getElementById("burn")
+  let lastInside = null       // last position inside the border, to fall back to after burning
 
   const kmh = document.getElementById("kmh")
   const playersEl = document.getElementById("players")
@@ -38,7 +44,7 @@ async function main() {
   const districtEl = document.getElementById("sign-district"), placeEl = document.getElementById("sign-place")
   const biomeEl = document.getElementById("biome")
   const timer = new THREE.Timer()
-  let netTimer = 0, signTimer = 0
+  let netTimer = 0, signTimer = 0, borderTimer = 0
   let placed = false          // car and camera snapped onto the terrain once the spawn tile is in
   let snapToRoad = false      // after a map teleport: move onto the nearest street once its tile is in
 
@@ -62,6 +68,21 @@ async function main() {
         placed = true
       }
       car.update(dt, input, (x, z) => chunks.heightAt(x, z))
+    }
+    // the edge of the world: cross the province border and you burn back to where you were
+    if (wall) {
+      wall.update(timer.getElapsed())
+      borderTimer += dt
+      if (borderTimer > 0.2) {
+        borderTimer = 0
+        if (wall.inside(car.x, car.z)) lastInside = { x: car.x, z: car.z, yaw: car.yaw }
+        else {
+          car.reset(lastInside ?? homeSpawn)
+          car.yaw += Math.PI                                      // turn around
+          placed = false
+          burnEl.classList.add("on"); setTimeout(() => burnEl.classList.remove("on"), 600)
+        }
+      }
     }
     world.followCamera(car, dt)
     remotes.update()

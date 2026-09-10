@@ -10,11 +10,20 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_10_000008) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_10_000009) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
   enable_extension "postgis_sfcgal"
+
+  create_table "boundaries", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.geometry "geom", limit: {srid: 28992, type: "multi_polygon"}, null: false
+    t.string "name", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geom"], name: "index_boundaries_on_geom", using: :gist
+    t.index ["name"], name: "index_boundaries_on_name", unique: true
+  end
 
   create_table "building_meshes", force: :cascade do |t|
     t.string "bag_id", null: false
