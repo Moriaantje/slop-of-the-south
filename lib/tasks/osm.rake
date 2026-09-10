@@ -112,9 +112,9 @@ namespace :osm do
                 height = tags["height"].to_s[/[\d.]+/]&.to_f || (levels ? levels * 3.2 + 1.5 : nil) || DEFAULT_HEIGHT.call(tags["building"])
                 wkt = "POLYGON((#{pts.join(",")}))"
                 conn.exec_query(<<~SQL, "building", [ el["id"], tags["building"], tags["name"], height, levels, wkt ])
-                  INSERT INTO buildings (osm_id, kind, name, height, levels, geom, created_at, updated_at)
-                  VALUES ($1, $2, $3, $4, $5, ST_Transform(ST_MakeValid(ST_GeomFromText($6, 4326)), 28992), now(), now())
-                  ON CONFLICT (osm_id) DO UPDATE SET kind = EXCLUDED.kind, name = EXCLUDED.name,
+                  INSERT INTO buildings (source, source_id, kind, name, height, levels, geom, created_at, updated_at)
+                  VALUES ('osm', $1, $2, $3, $4, $5, ST_Transform(ST_MakeValid(ST_GeomFromText($6, 4326)), 28992), now(), now())
+                  ON CONFLICT (source, source_id) DO UPDATE SET kind = EXCLUDED.kind, name = EXCLUDED.name,
                     height = EXCLUDED.height, levels = EXCLUDED.levels, geom = EXCLUDED.geom, updated_at = now()
                 SQL
                 buildings += 1

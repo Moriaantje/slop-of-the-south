@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_10_000004) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_10_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -18,14 +18,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_000004) do
   create_table "buildings", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.geometry "geom", limit: {srid: 28992, type: "st_polygon"}, null: false
+    t.float "ground_height"
     t.float "height", default: 6.0, null: false
     t.string "kind"
     t.integer "levels"
     t.string "name"
-    t.bigint "osm_id", null: false
+    t.float "roof_height"
+    t.string "roof_type"
+    t.string "source", default: "osm", null: false
+    t.string "source_id", null: false
     t.datetime "updated_at", null: false
+    t.integer "year"
     t.index ["geom"], name: "index_buildings_on_geom", using: :gist
-    t.index ["osm_id"], name: "index_buildings_on_osm_id", unique: true
+    t.index ["source", "source_id"], name: "index_buildings_on_source_and_source_id", unique: true
+    t.index ["source"], name: "index_buildings_on_source"
   end
 
   create_table "places", force: :cascade do |t|

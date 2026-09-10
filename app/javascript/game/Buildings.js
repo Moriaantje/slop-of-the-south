@@ -10,6 +10,8 @@ const palette = {
   apartments: 0xc9b39a, office: 0xa9b3bd, school: 0xd4b489,
   default: 0xd9c4a5,        // Limburg brick-ish
 }
+// 3D BAG parts carry a roof type instead of an OSM kind: flat roofs read as commercial/apartment blocks
+const roofPalette = { horizontal: 0xc3b9a8, "multiple horizontal": 0xbfb3a0 }
 
 // Footprints (game x/z) → extruded boxes sitting on the terrain, merged into one mesh per tile.
 export function buildBuildings(buildings) {
@@ -22,7 +24,7 @@ export function buildBuildings(buildings) {
     g.rotateX(-Math.PI / 2)                       // extrude along +Y; shape y → -z
     g.translate(0, b.base - 0.5, 0)               // sink slightly so slopes don't show gaps
 
-    color.setHex(palette[b.kind] ?? palette.default)
+    color.setHex(palette[b.kind] ?? roofPalette[b.roof] ?? palette.default)
     const tint = 0.9 + Math.random() * 0.2
     const cols = new Float32Array(g.attributes.position.count * 3)
     for (let i = 0; i < cols.length; i += 3) { cols[i] = color.r * tint; cols[i + 1] = color.g * tint; cols[i + 2] = color.b * tint }

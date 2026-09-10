@@ -48,12 +48,16 @@ class TileBuilder
       next if ring.nil? || ring.size < 4
       ring = ring[0...-1] # drop closing vertex
       base = ring.map { |x, y| @heights.sample(x, y) }.min
+      # 3D BAG gives the absolute roof level (m NAP): extrude from the terrain up to it, so roofs sit at their true
+      # height even where the DEM and the building ground level disagree a little. OSM only has a relative height.
+      height = b["roof_height"] ? b["roof_height"].to_f - base : b["height"].to_f
       {
         base: base.round(2),
-        height: b["height"].to_f.clamp(2.5, 200.0),
+        height: height.clamp(2.5, 200.0).round(2),
         kind: b["kind"],
+        roof: b["roof_type"],
         footprint: ring.map { |x, y| World.to_game(x, y).map { _1.round(2) } }
-      }
+      }.compact
     end
   end
 

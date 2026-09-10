@@ -41,9 +41,9 @@ Game space is RD minus a fixed origin so floats stay small:
 | Layer | Source | Notes |
 |---|---|---|
 | Roads, water, land use | OpenStreetMap via Overpass (MVP) or Geofabrik Limburg `.pbf` + `osm2pgsql` (full box) | `rake osm:fetch osm:import` |
-| Building footprints | OpenStreetMap | `height` / `building:levels` tags, fallback 6 m |
+| Buildings | **3D BAG** (3dbag.nl, TU Delft, CC BY 4.0) | LoD1.3: every building split into parts with a measured roof height (70th percentile) and the ground level. `rake bag3d:fetch bag3d:import` downloads the GeoPackage tiles and loads them with `ogr2ogr`. |
+| Buildings (fallback) | OpenStreetMap footprints | Only used where no 3D BAG building overlaps, i.e. across the German border. `height` / `building:levels` tags, fallback 6 m. |
 | Place names | OpenStreetMap `place=*` nodes (towns, villages, wijken) | Drive the HUD street sign (nearest named road + nearest place) |
-| Building heights (upgrade) | **3D BAG** (3dbag.nl, TU Delft, CC-BY) | Far better heights than OSM. Import the GeoPackage with `ogr2ogr` into the `buildings` table. |
 | Terrain | **AHN** (Actueel Hoogtebestand Nederland) DTM via PDOK WCS | OSM has no elevation. AHN is 0.5 m lidar; the WCS resamples it to the 10 m grid on request, `gdal_fillnodata` fills the holes under buildings and water. Zuid-Limburg is genuinely hilly — 27 m at the Maas to 114 m on the plateau within the phase-1 box. |
 
 Everything above is open data. Keep attribution ("© OpenStreetMap contributors", "AHN", "3D BAG")
@@ -95,7 +95,7 @@ Tiles are static JSON served by nginx/Rails' static file server — no DB hit wh
 5. **Feel** — sound, skid marks, better car model, day/night, collisions with buildings.
 6. **Game** — checkpoints between the villages, time trials, leaderboards (Solid Queue jobs),
    maybe a "deliver the vlaai" delivery mode.
-7. **Scale** — full bounding box, 3D BAG heights, water (Maas, Julianakanaal), trees from OSM
+7. **Scale** — full bounding box, water (Maas, Julianakanaal), trees from OSM
    `natural=wood` / `landuse=forest`.
 
 ---
@@ -120,6 +120,8 @@ Edit `config/database.yml` and set `adapter: postgis` for every environment.
 bin/rails db:create db:migrate
 bin/rails osm:fetch            # Overpass → data/osm/*.json  (phase-1 box, ~1–3 min)
 bin/rails osm:import           # → PostGIS
+bin/rails bag3d:fetch          # 3D BAG GeoPackage tiles for the box → data/bag3d/tiles (~160 MB for phase 1)
+bin/rails bag3d:import         # → PostGIS buildings (source bag3d); needs GDAL
 # real terrain (needs GDAL: brew install gdal):
 bin/rails dem:fetch            # AHN terrain model from PDOK WCS → data/dem_raw.tif (10 m, ~1 min)
 bin/rails dem:build            # fill holes, convert → data/dem.asc
