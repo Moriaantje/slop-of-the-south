@@ -3,6 +3,7 @@ import { TerrainTile } from "game/TerrainTile"
 import { buildRoads } from "game/Roads"
 import { buildBuildings } from "game/Buildings"
 import { buildBuildingMeshes } from "game/BuildingMeshes"
+import { buildTrees } from "game/Trees"
 
 // Streams 500 m tiles in a square around the player and disposes the ones left behind.
 export class ChunkManager {
@@ -72,6 +73,8 @@ export class ChunkManager {
       if (buildings) group.add(buildings)
       const meshes = buildBuildingMeshes(data.meshes)
       if (meshes) group.add(meshes)
+      const trees = buildTrees(data.trees, (x, z) => terrain.heightAt(x, z))
+      if (trees) group.add(trees)
       this.scene.add(group)
       this.tiles.set(key, { group, terrain, roads: data.roads })
     } catch (e) {
@@ -82,6 +85,10 @@ export class ChunkManager {
 
   dispose(t) {
     this.scene.remove(t.group)
-    t.group.traverse((o) => { o.geometry?.dispose(); if (o.material && !o.material.__shared) o.material.dispose() })
+    t.group.traverse((o) => {
+      if (o.isInstancedMesh) o.dispose()                                   // instance buffers
+      if (o.geometry && !o.geometry.__shared) o.geometry.dispose()
+      if (o.material && !o.material.__shared) o.material.dispose()
+    })
   }
 }

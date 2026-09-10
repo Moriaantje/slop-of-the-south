@@ -8,7 +8,7 @@ namespace :tiles do
     # Tile indices touched by any imported geometry
     rows = ActiveRecord::Base.connection.select_rows(<<~SQL)
       SELECT DISTINCT tx, ty FROM (
-        SELECT geom FROM roads UNION ALL SELECT geom FROM buildings
+        SELECT geom FROM roads UNION ALL SELECT geom FROM buildings UNION ALL SELECT geom FROM trees
       ) g,
       generate_series(floor(ST_XMin(geom) / #{s})::int, floor(ST_XMax(geom) / #{s})::int) AS tx,
       generate_series(floor(ST_YMin(geom) / #{s})::int, floor(ST_YMax(geom) / #{s})::int) AS ty

@@ -36,6 +36,7 @@
 # Geodata downloads and generated tiles (large; rebuild with rake osm:fetch / tiles:build)
 /data/osm/
 /data/bag3d/
+/data/bgt/
 /data/*.asc
 /data/*.tif
 /data/*.prj

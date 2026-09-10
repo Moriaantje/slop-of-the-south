@@ -16,7 +16,8 @@ class TileBuilder
       heights: heights_for(x0, y0),
       roads: roads_for(tx, ty),
       buildings: buildings_for(tx, ty, skip: meshes.map { _1[:id] }.to_set),
-      meshes: meshes
+      meshes: meshes,
+      trees: trees_for(tx, ty)
     }
   end
 
@@ -96,6 +97,15 @@ class TileBuilder
     pts.flat_map do |x, y, z|
       gx, gz = World.to_game(x, y)
       [ ((gx - ox) * 100).round, ((z + dz - oy) * 100).round, ((gz - oz) * 100).round ]
+    end
+  end
+
+  # Trees as [x, z, kind, height] in game units (kind 0 street tree, 1 deciduous wood, 2 conifer); the client
+  # samples the terrain for y.
+  def trees_for(tx, ty)
+    Tree.in_tile(tx, ty).map do |x, y, kind, h|
+      gx, gz = World.to_game(x, y)
+      [ gx.round(1), gz.round(1), kind, h.round(1) ]
     end
   end
 

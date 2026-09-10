@@ -28,6 +28,7 @@ async function main() {
   const districtEl = document.getElementById("sign-district"), placeEl = document.getElementById("sign-place")
   const timer = new THREE.Timer()
   let netTimer = 0, signTimer = 0
+  let placed = false          // car and camera snapped onto the terrain once the spawn tile is in
 
   function frame(now) {
     timer.update(now)
@@ -35,7 +36,13 @@ async function main() {
 
     chunks.update(car.x, car.z)
     if (chunks.ready(car.x, car.z)) {
-      if (input.reset) car.reset(config.spawn)
+      if (input.reset) { car.reset(config.spawn); placed = false }
+      if (!placed) {
+        car.y = chunks.heightAt(car.x, car.z)
+        car.mesh.position.y = car.y
+        world.followCamera(car, 1e3)   // huge dt → camera jumps straight behind the car instead of rising out of the ground
+        placed = true
+      }
       car.update(dt, input, (x, z) => chunks.heightAt(x, z))
     }
     world.followCamera(car, dt)

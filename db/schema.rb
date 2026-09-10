@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_10_000006) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_10_000007) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -72,5 +72,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_000006) do
     t.float "width", default: 5.5, null: false
     t.index ["geom"], name: "index_roads_on_geom", using: :gist
     t.index ["osm_id"], name: "index_roads_on_osm_id", unique: true
+  end
+
+  create_table "trees", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.geometry "geom", limit: {srid: 28992, type: "st_point"}, null: false
+    t.float "height", null: false
+    t.string "kind", null: false
+    t.string "source", null: false
+    t.string "source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geom"], name: "index_trees_on_geom", using: :gist
+    t.index ["source", "source_id"], name: "index_trees_on_source_and_source_id", unique: true
   end
 end
