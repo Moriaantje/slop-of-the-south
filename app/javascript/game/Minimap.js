@@ -1,22 +1,77 @@
-// Minimap on PDOK's BRT Achtergrondkaart (Kadaster, CC BY 4.0), served in the RD tile matrix, so map pixels
-// convert to RD metres exactly. Small: follows the car, north-up. Expanded (M): the whole play area; a click
-// teleports the car there.
-const ORIGIN_X = -285401.92, ORIGIN_Y = 903401.92, RES0 = 3440.64, TILE = 256, MAX_ZOOM = 14
+// Minimap drawn from our own map data (see MapBuilder): an overview of the whole play area plus 1 km detail cells
+// fetched as you zoom in. Small: follows the car, north-up. Expanded (M): drag to pan, wheel to zoom around the
+// cursor, F fits the full bounds, a click teleports the car, Escape/M close.
 const SMALL_SCALE = 3.5          // m/px in the corner map
+const DETAIL_SCALE = 4.5         // load 1 km detail cells when zoomed in beyond this (the corner map included)
+const MIN_SCALE = 0.4            // max zoom-in
+const REDRAW_MS = 80
+
+const BASE = "#d7dec3"
+const COVER = {
+  1: "#c3da98", 2: "#cde0a6", 3: "#bad39a", 4: "#eadcae", 5: "#bfd99a", 6: "#c9da9f", 7: "#9cc286", 8: "#d3c7a6", 9: "#b3cd90",
+  10: "#b8cea4", 11: "#efe4c3", 12: "#d4d2b4", 20: "#e7e2d7", 21: "#cdcdcf", 22: "#dbd5ce", 23: "#ddd8cb", 24: "#d9d1bf", 30: "#9cc3e0"
+}
+const ROAD = {
+  motorway: ["#e88b5a", 2.2], motorway_link: ["#e88b5a", 1.4], trunk: ["#f0a866", 2.0], trunk_link: ["#f0a866", 1.3],
+  primary: ["#f5b76b", 1.9], primary_link: ["#f5b76b", 1.2], secondary: ["#f7dd8f", 1.7], secondary_link: ["#f7dd8f", 1.1],
+  tertiary: ["#fbeeb5", 1.5], tertiary_link: ["#fbeeb5", 1.0], default: ["#ffffff", 1.2]
+}
+const BUILDING = "#b7a597", TREE = "#5f8c3e", WATER_EDGE = "#7fa9cc"
 
 export class Minimap {
   constructor(canvas, config, { onTeleport }) {
     this.canvas = canvas
     this.ctx = canvas.getContext("2d")
     this.cfg = config
+    this.origin = config.origin
     this.onTeleport = onTeleport
     this.expanded = false
-    this.images = new Map()        // "z/x/y" → HTMLImageElement
+    this.view = { cx: 0, cz: 0, scale: SMALL_SCALE }
+    this.cells = new Map()          // "mx_my" → data | "loading" | "missing"
+    this.overview = null
     this.dirty = true
+    this.lastDraw = 0
+    this.drag = null
     this.hover = null
-    canvas.addEventListener("click", (e) => this.click(e))
-    canvas.addEventListener("mousemove", (e) => { this.hover = this.expanded ? [e.offsetX, e.offsetY] : null; this.dirty = true })
-    canvas.addEventListener("mouseleave", () => { this.hover = null; this.dirty = true })
+    fetch("/map/overview.json").then((r) => (r.ok ? r : fetch("/api/map/overview"))).then((r) => r.json())
+      .then((o) => { this.overview = o; this.dirty = true; if (this.expanded) this.fit() }).catch(console.warn)
+
+    canvas.addEventListener("mousedown", (e) => { this.drag = { x: e.offsetX, y: e.offsetY, moved: false }; e.preventDefault() })
+    canvas.addEventListener("mousemove", (e) => {
+      this.hover = this.expanded ? [e.offsetX, e.offsetY] : null
+      if (this.drag && this.expanded) {
+        const dx = e.offsetX - this.drag.x, dy = e.offsetY - this.drag.y
+        if (Math.abs(dx) + Math.abs(dy) > 3) this.drag.moved = true
+        if (this.drag.moved) { this.view.cx -= dx * this.view.scale; this.view.cz -= dy * this.view.scale; this.drag.x = e.offsetX; this.drag.y = e.offsetY }
+      }
+      this.dirty = true
+    })
+    canvas.addEventListener("mouseup", (e) => {
+      const drag = this.drag; this.drag = null
+      if (!drag) return
+      if (!this.expanded) { this.toggle(); return }                // clicking the small map opens it
+      if (drag.moved) return
+      const [x, z] = this.toWorld(e.offsetX, e.offsetY)
+      this.onTeleport(x, z)
+      this.toggle()
+    })
+    canvas.addEventListener("mouseleave", () => { this.hover = null; this.drag = null; this.dirty = true })
+    canvas.addEventListener("wheel", (e) => {
+      if (!this.expanded) return
+      e.preventDefault()
+      const [wx, wz] = this.toWorld(e.offsetX, e.offsetY)
+      const factor = Math.exp(e.deltaY * 0.0015)
+      this.view.scale = Math.min(this.fitScale() * 1.5, Math.max(MIN_SCALE, this.view.scale * factor))
+      // keep the world point under the cursor fixed
+      this.view.cx = wx - (e.offsetX - this.w / 2) * this.view.scale
+      this.view.cz = wz - (e.offsetY - this.h / 2) * this.view.scale
+      this.dirty = true
+    }, { passive: false })
+    addEventListener("keydown", (e) => {
+      if (!this.expanded) return
+      if (e.code === "KeyF") this.fit()
+      if (e.code === "Escape") this.toggle()
+    })
     addEventListener("resize", () => this.resize())
     this.resize()
   }
@@ -25,6 +80,7 @@ export class Minimap {
     this.expanded = !this.expanded
     this.canvas.classList.toggle("expanded", this.expanded)
     this.resize()
+    if (this.expanded) this.fit()
   }
 
   resize() {
@@ -36,88 +92,202 @@ export class Minimap {
     this.dirty = true
   }
 
-  // view: RD centre and metres per CSS pixel
-  view(car) {
-    if (this.expanded) {
-      const [x0, y0, x1, y1] = this.cfg.bounds
-      const scale = Math.max((x1 - x0) / this.w, (y1 - y0) / this.h) * 1.04
-      return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, scale }
-    }
-    return { cx: car.x + this.cfg.origin.x, cy: this.cfg.origin.y - car.z, scale: SMALL_SCALE }
+  bounds() {
+    if (this.overview) return this.overview.bounds
+    const [x0, y0, x1, y1] = this.cfg.bounds        // RD → game
+    return [x0 - this.origin.x, -(y1 - this.origin.y), x1 - this.origin.x, -(y0 - this.origin.y)]
   }
 
-  toPixel(v, rx, ry) { return [this.w / 2 + (rx - v.cx) / v.scale, this.h / 2 - (ry - v.cy) / v.scale] }
-  toRD(v, px, py) { return [v.cx + (px - this.w / 2) * v.scale, v.cy - (py - this.h / 2) * v.scale] }
+  fitScale() {
+    const [xw, zn, xe, zs] = this.bounds()
+    return Math.max((xe - xw) / this.w, (zs - zn) / this.h) * 1.04
+  }
+
+  fit() {
+    const [xw, zn, xe, zs] = this.bounds()
+    this.view = { cx: (xw + xe) / 2, cz: (zn + zs) / 2, scale: this.fitScale() }
+    this.dirty = true
+  }
+
+  toPixel(x, z) { return [this.w / 2 + (x - this.view.cx) / this.view.scale, this.h / 2 + (z - this.view.cz) / this.view.scale] }
+  toWorld(px, py) { return [this.view.cx + (px - this.w / 2) * this.view.scale, this.view.cz + (py - this.h / 2) * this.view.scale] }
 
   update(car, remotes) {
     this.car = car; this.remotes = remotes
-    if (!this.dirty && !this.expanded && this.lastX === car.x && this.lastZ === car.z && this.lastYaw === car.yaw) return
-    this.lastX = car.x; this.lastZ = car.z; this.lastYaw = car.yaw
-    this.dirty = false
-    this.draw()
+    if (!this.expanded) {
+      if (this.view.cx !== car.x || this.view.cz !== car.z) this.dirty = true
+      this.view = { cx: car.x, cz: car.z, scale: SMALL_SCALE }
+    }
+    if (this.view.scale < DETAIL_SCALE) this.loadCells()
+    const now = performance.now()
+    if ((this.dirty || this.expanded) && now - this.lastDraw > REDRAW_MS) { this.lastDraw = now; this.dirty = false; this.draw() }
+  }
+
+  // 1 km cells (RD grid) intersecting the view
+  cellsInView() {
+    const [xw, zn] = this.toWorld(0, 0), [xe, zs] = this.toWorld(this.w, this.h)
+    const mx0 = Math.floor((xw + this.origin.x) / 1000), mx1 = Math.floor((xe + this.origin.x) / 1000)
+    const my0 = Math.floor((this.origin.y - zs) / 1000), my1 = Math.floor((this.origin.y - zn) / 1000)
+    const range = this.overview?.cells
+    const out = []
+    for (let my = my0; my <= my1; my++)
+      for (let mx = mx0; mx <= mx1; mx++) {
+        if (range && (mx < range[0] || mx >= range[2] || my < range[1] || my >= range[3])) continue
+        out.push([mx, my])
+      }
+    return out
+  }
+
+  loadCells() {
+    for (const [mx, my] of this.cellsInView()) {
+      const key = `${mx}_${my}`
+      if (this.cells.has(key)) continue
+      this.cells.set(key, "loading")
+      fetch(`/map/${key}.json`).then((r) => (r.ok ? r : fetch(`/api/map/${mx}/${my}`))).then((r) => (r.ok ? r.json() : null))
+        .then((data) => { this.cells.set(key, data ?? "missing"); this.dirty = true })
+        .catch(() => this.cells.set(key, "missing"))
+    }
   }
 
   draw() {
     const { ctx, w, h } = this
-    const v = this.view(this.car)
-    ctx.fillStyle = "#e8e4d8"
+    const s = this.view.scale
+    ctx.fillStyle = BASE
     ctx.fillRect(0, 0, w, h)
-    // pick the zoom whose resolution is just finer than the view scale
-    const z = Math.min(MAX_ZOOM, Math.max(0, Math.ceil(Math.log2(RES0 / v.scale))))
-    const res = RES0 / 2 ** z, span = TILE * res
-    const [rx0, ry1] = this.toRD(v, 0, 0), [rx1, ry0] = this.toRD(v, w, h)
-    const tx0 = Math.floor((rx0 - ORIGIN_X) / span), tx1 = Math.floor((rx1 - ORIGIN_X) / span)
-    const ty0 = Math.floor((ORIGIN_Y - ry1) / span), ty1 = Math.floor((ORIGIN_Y - ry0) / span)
-    const size = span / v.scale
-    for (let ty = ty0; ty <= ty1; ty++)
-      for (let tx = tx0; tx <= tx1; tx++) {
-        const img = this.tile(z, tx, ty)
-        if (!img?.complete || !img.naturalWidth) continue
-        const [px, py] = this.toPixel(v, ORIGIN_X + tx * span, ORIGIN_Y - ty * span)
-        ctx.drawImage(img, px, py, size + 0.5, size + 0.5)
-      }
-    // other drivers
+    const detail = s < DETAIL_SCALE
+    const cells = detail ? this.cellsInView().map(([mx, my]) => this.cells.get(`${mx}_${my}`)).filter((c) => c && typeof c === "object") : []
+
+    if (this.overview) this.drawCover(this.overview.cover)
+    for (const c of cells) this.drawCover(c.cover)
+    if (this.overview && !detail) this.drawRoads(this.overview.roads, false)
+    for (const c of cells) this.drawRoads(c.roads, s < 2.5)
+    if (s < 4) for (const c of cells) this.drawBuildings(c.buildings)
+    if (s < 1.8) for (const c of cells) this.drawTrees(c.trees)
+    if (this.expanded) this.drawLabels()
+    this.drawCars()
+    if (this.expanded) this.drawChrome()
+  }
+
+  path(flat, offset = 0) {
+    const { ctx } = this
+    let [px, py] = this.toPixel(flat[offset], flat[offset + 1])
+    ctx.moveTo(px, py)
+    for (let i = offset + 2; i + 1 < flat.length; i += 2) { [px, py] = this.toPixel(flat[i], flat[i + 1]); ctx.lineTo(px, py) }
+  }
+
+  drawCover(cover) {
+    const { ctx } = this
+    for (const entry of cover) {
+      const color = COVER[entry[0]]
+      if (!color) continue
+      ctx.fillStyle = color
+      ctx.beginPath()
+      for (let r = 1; r < entry.length; r++) { this.path(entry[r]); ctx.closePath() }
+      ctx.fill("evenodd")
+      if (entry[0] === 30 && this.view.scale < 6) { ctx.strokeStyle = WATER_EDGE; ctx.lineWidth = 1; ctx.stroke() }
+    }
+  }
+
+  drawRoads(roads, casing) {
+    const { ctx } = this
+    ctx.lineCap = "round"; ctx.lineJoin = "round"
+    const widthOf = (road) => { const [, min] = ROAD[road[0]] ?? ROAD.default; return Math.max(min, road[1] / this.view.scale) }
+    if (casing) {
+      ctx.strokeStyle = "#9a9a9a"
+      for (const road of roads) { ctx.lineWidth = widthOf(road) + 1.6; ctx.beginPath(); this.path(road, 3); ctx.stroke() }
+    }
+    for (const road of roads) {
+      ctx.strokeStyle = (ROAD[road[0]] ?? ROAD.default)[0]
+      ctx.lineWidth = widthOf(road)
+      ctx.beginPath(); this.path(road, 3); ctx.stroke()
+    }
+    if (this.view.scale < 1.2) this.drawRoadNames(roads)
+  }
+
+  drawRoadNames(roads) {
+    const { ctx } = this
+    ctx.font = "10px system-ui, sans-serif"; ctx.fillStyle = "#333"; ctx.textAlign = "center"; ctx.textBaseline = "middle"
+    const seen = new Set()
+    for (const road of roads) {
+      const name = road[2]
+      if (!name || seen.has(name) || road.length < 7) continue
+      // label at the middle segment, along its direction
+      const mid = 3 + 2 * Math.floor((road.length - 3) / 4)
+      const [ax, ay] = this.toPixel(road[mid], road[mid + 1]), [bx, by] = this.toPixel(road[mid + 2], road[mid + 3])
+      const len = Math.hypot(bx - ax, by - ay)
+      if (len < name.length * 5) continue
+      let angle = Math.atan2(by - ay, bx - ax)
+      if (angle > Math.PI / 2 || angle < -Math.PI / 2) angle += Math.PI
+      seen.add(name)
+      ctx.save(); ctx.translate((ax + bx) / 2, (ay + by) / 2); ctx.rotate(angle); ctx.fillText(name, 0, 0); ctx.restore()
+    }
+  }
+
+  drawBuildings(buildings) {
+    const { ctx } = this
+    ctx.fillStyle = BUILDING
+    ctx.beginPath()
+    for (const ring of buildings) { this.path(ring); ctx.closePath() }
+    ctx.fill()
+  }
+
+  drawTrees(trees) {
+    const { ctx } = this
+    const r = Math.max(1, 1.5 / this.view.scale)
+    ctx.fillStyle = TREE
+    ctx.beginPath()
+    for (let i = 0; i + 1 < trees.length; i += 2) { const [px, py] = this.toPixel(trees[i], trees[i + 1]); ctx.moveTo(px + r, py); ctx.arc(px, py, r, 0, Math.PI * 2) }
+    ctx.fill()
+  }
+
+  drawLabels() {
+    const { ctx } = this
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"
+    for (const p of this.cfg.places) {
+      const settlement = ["city", "town", "village", "hamlet"].includes(p.kind)
+      if (!settlement && this.view.scale > 8) continue
+      if (p.kind === "hamlet" && this.view.scale > 12) continue
+      const [px, py] = this.toPixel(p.x, p.z)
+      if (px < -50 || py < -20 || px > this.w + 50 || py > this.h + 20) continue
+      ctx.font = settlement ? `bold ${p.kind === "hamlet" ? 11 : 13}px system-ui, sans-serif` : "italic 11px system-ui, sans-serif"
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.strokeText(p.name, px, py)
+      ctx.fillStyle = settlement ? "#222" : "#555"; ctx.fillText(p.name, px, py)
+    }
+  }
+
+  drawCars() {
+    const { ctx } = this
     if (this.remotes) for (const [, rc] of this.remotes.cars) {
       const p = rc.mesh.position
-      const [px, py] = this.toPixel(v, p.x + this.cfg.origin.x, this.cfg.origin.y - p.z)
+      const [px, py] = this.toPixel(p.x, p.z)
       ctx.fillStyle = "#" + rc.color.toString(16).padStart(6, "0")
       ctx.beginPath(); ctx.arc(px, py, this.expanded ? 5 : 4, 0, Math.PI * 2); ctx.fill()
       ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke()
     }
-    // own car: arrow pointing along the heading (yaw 0 = north = up)
-    const [cx, cy] = this.toPixel(v, this.car.x + this.cfg.origin.x, this.cfg.origin.y - this.car.z)
-    ctx.save(); ctx.translate(cx, cy); ctx.rotate(-this.car.yaw)
+    if (!this.car) return
+    const [cx, cy] = this.toPixel(this.car.x, this.car.z)
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(-this.car.yaw)     // yaw 0 = north = up
     const s = this.expanded ? 9 : 7
     ctx.beginPath(); ctx.moveTo(0, -s * 1.3); ctx.lineTo(s * 0.8, s); ctx.lineTo(0, s * 0.5); ctx.lineTo(-s * 0.8, s); ctx.closePath()
     ctx.fillStyle = "#d7412b"; ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke()
     ctx.restore()
-    if (this.expanded) {
-      if (this.hover) {                                       // crosshair under the mouse
-        ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.lineWidth = 1
-        ctx.beginPath(); ctx.moveTo(this.hover[0] - 12, this.hover[1]); ctx.lineTo(this.hover[0] + 12, this.hover[1])
-        ctx.moveTo(this.hover[0], this.hover[1] - 12); ctx.lineTo(this.hover[0], this.hover[1] + 12); ctx.stroke()
-      }
-      ctx.font = "12px system-ui, sans-serif"; ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.textAlign = "right"
-      ctx.fillText("klik om te teleporteren · M sluit · © Kadaster / PDOK", w - 10, h - 8)
-    }
   }
 
-  tile(z, x, y) {
-    const key = `${z}/${x}/${y}`
-    let img = this.images.get(key)
-    if (!img) {
-      img = new Image()
-      img.onload = () => { this.dirty = true }
-      img.src = `/map/${key}.png`
-      this.images.set(key, img)
+  drawChrome() {
+    const { ctx, w, h } = this
+    if (this.hover) {
+      ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(this.hover[0] - 12, this.hover[1]); ctx.lineTo(this.hover[0] + 12, this.hover[1])
+      ctx.moveTo(this.hover[0], this.hover[1] - 12); ctx.lineTo(this.hover[0], this.hover[1] + 12); ctx.stroke()
     }
-    return img
-  }
-
-  click(e) {
-    if (!this.expanded) { this.toggle(); return }               // clicking the small map opens it
-    const [rx, ry] = this.toRD(this.view(this.car), e.offsetX, e.offsetY)
-    this.onTeleport(rx - this.cfg.origin.x, -(ry - this.cfg.origin.y))
-    this.toggle()
+    // scale bar
+    const metres = [100, 200, 500, 1000, 2000, 5000].find((m) => m / this.view.scale > 70) ?? 5000
+    const px = metres / this.view.scale
+    ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.fillRect(10, h - 30, px + 16, 22)
+    ctx.fillStyle = "#333"; ctx.fillRect(18, h - 14, px, 3)
+    ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"
+    ctx.fillText(metres >= 1000 ? `${metres / 1000} km` : `${metres} m`, 18, h - 17)
+    ctx.textAlign = "right"; ctx.fillStyle = "rgba(0,0,0,.6)"
+    ctx.fillText("slepen · scrollen zoomt · klik teleporteert · F alles · M/Esc sluit", w - 10, h - 10)
   }
 }

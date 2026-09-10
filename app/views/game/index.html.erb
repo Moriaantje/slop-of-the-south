@@ -17,7 +17,7 @@
 </div>
 
 <canvas id="minimap" class="minimap"></canvas>
-<div id="help">W A S D of pijltjes · spatie handrem · R terug op de weg · M kaart</div>
+<div id="help">W A S D of pijltjes · spatie handrem · R terug op de weg · M kaart (slepen, scrollen, klik = teleport)</div>
 
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb8cf;
@@ -49,4 +49,5 @@
              box-shadow: 0 3px 10px rgba(0, 0, 0, .3); background: #e8e4d8; cursor: pointer; }
   .minimap.expanded { left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -50%); width: min(92vw, 92vh); height: min(92vw, 92vh);
                       cursor: crosshair; }
+  .minimap.expanded:active { cursor: grabbing; }
 </style>

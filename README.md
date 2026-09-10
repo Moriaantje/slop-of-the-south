@@ -48,9 +48,8 @@ Game space is RD minus a fixed origin so floats stay small:
 | Trees | **BGT** (Basisregistratie Grootschalige Topografie) via PDOK OGC API Features | `vegetatieobject_punt` gives every registered tree (`plus_type = boom`); woodland polygons from `begroeidterreindeel` (loofbos, naaldbos, gemengd bos, houtwal) are filled with deterministically scattered trees (`ST_GeneratePoints`). `rake bgt:fetch bgt:import`. |
 | Terrain | **AHN** (Actueel Hoogtebestand Nederland) DTM via PDOK WCS | OSM has no elevation. AHN is 0.5 m lidar; the WCS resamples it to the 10 m grid on request, `gdal_fillnodata` fills the holes under buildings and water. Zuid-Limburg is genuinely hilly — 27 m at the Maas to 114 m on the plateau within the phase-1 box. |
 
-| Minimap | **BRT Achtergrondkaart** (Kadaster) via PDOK WMTS, RD tile matrix | Cached on first use under `public/map/`. Pixel ↔ RD is exact, so the expanded map doubles as a teleporter. |
 
-Everything above is open data. Keep attribution ("© OpenStreetMap contributors", "AHN", "3D BAG", "BGT", "© Kadaster")
+Everything above is open data. Keep attribution ("© OpenStreetMap contributors", "AHN", "3D BAG", "BGT")
 in the game's about screen.
 
 ### 1.4 Pipeline
@@ -94,7 +93,8 @@ Tiles are static JSON served by nginx/Rails' static file server — no DB hit wh
     game/Trees.js            procedural branching trees, a few seeded variants per kind, instanced per tile;
                              variant, rotation, width and tint come from the tree position, so every tree is stable
     game/Locator.js          nearest named road + nearest place for the street sign
-    game/Minimap.js          BRT map tiles on a canvas; M expands it, click teleports
+    game/Minimap.js          map drawn from our own data (MapBuilder → public/map): overview + 1 km detail cells;
+                             M expands, drag pans, wheel zooms, F fits the bounds, click teleports
     game/Vehicle.js          arcade bicycle-model car physics
     game/Input.js            keyboard
     game/Network.js          Action Cable
@@ -141,6 +141,7 @@ bin/rails bgt:import           # → PostGIS trees (registered, woodland, orchar
 bin/rails dem:fetch            # AHN terrain model from PDOK WCS → data/dem_raw.tif (10 m, ~1 min)
 bin/rails dem:build            # fill holes, convert → data/dem.asc
 bin/rails tiles:build          # → public/tiles/*.json  (flat terrain if no dem.asc)
+bin/rails map:build            # → public/map/overview.json + 1 km cells for the minimap (also built on demand)
 bin/dev                        # Rails (Puma on :3000)
 ```
 
@@ -166,4 +167,5 @@ Open http://localhost:3000 in two browser windows and drive.
 - With LoD2.2 buildings a dense town tile is about 1 MB of JSON (roughly 100 MB for phase 1). Fine locally; serve
   `public/tiles` gzipped (or move to a binary tile format) before putting it on the internet.
 Controls: W/↑ accelerate, S/↓ brake/reverse, A/D or ←/→ steer, Space handbrake, R reset to road, M expand the minimap
-(click on the expanded map to teleport). `?spawn=x,z,yaw` in the URL spawns at game coordinates.
+(drag to pan, scroll to zoom, F fits the whole area, click to teleport, Esc closes). `?spawn=x,z,yaw` in the URL
+spawns at game coordinates.
