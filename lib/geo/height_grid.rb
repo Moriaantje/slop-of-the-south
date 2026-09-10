@@ -8,6 +8,11 @@ module Geo
       File.exist?(path) ? new(path) : Flat.new
     end
 
+    # Parsed once per process: the DEM is tens of MB of ASCII, too slow to reload for every on-demand tile.
+    def self.current
+      @current ||= load
+    end
+
     class Flat
       def sample(_x, _y) = FLAT_HEIGHT
     end
@@ -54,7 +59,7 @@ module Geo
 
     def at(r, c)
       v = @rows[r][c]
-      v == @nodata ? FLAT_HEIGHT : v
+      v == @nodata || v.abs > 1e30 ? FLAT_HEIGHT : v   # GDAL writes float-max for no-data
     end
   end
 end

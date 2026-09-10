@@ -37,4 +37,6 @@
 /data/osm/
 /data/*.asc
 /data/*.tif
+/data/*.prj
+/data/*.aux.xml
 /public/tiles/

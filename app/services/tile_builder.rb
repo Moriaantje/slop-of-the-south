@@ -2,7 +2,7 @@
 # into the JSON the Three.js client consumes.
 # All coordinates are converted to game units (x east, z south, y up).
 class TileBuilder
-  def initialize(heights: Geo::HeightGrid.load)
+  def initialize(heights: Geo::HeightGrid.current)
     @heights = heights
   end
 

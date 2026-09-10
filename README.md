@@ -44,7 +44,7 @@ Game space is RD minus a fixed origin so floats stay small:
 | Building footprints | OpenStreetMap | `height` / `building:levels` tags, fallback 6 m |
 | Place names | OpenStreetMap `place=*` nodes (towns, villages, wijken) | Drive the HUD street sign (nearest named road + nearest place) |
 | Building heights (upgrade) | **3D BAG** (3dbag.nl, TU Delft, CC-BY) | Far better heights than OSM. Import the GeoPackage with `ogr2ogr` into the `buildings` table. |
-| Terrain | **AHN** (Actueel Hoogtebestand Nederland) DTM via PDOK | OSM has no elevation. AHN is 0.5 m lidar; downsample to 10 m with `gdalwarp`. Zuid-Limburg is genuinely hilly — the Geleenbeek valley and the Schinnen/Puth hills will look great. |
+| Terrain | **AHN** (Actueel Hoogtebestand Nederland) DTM via PDOK WCS | OSM has no elevation. AHN is 0.5 m lidar; the WCS resamples it to the 10 m grid on request, `gdal_fillnodata` fills the holes under buildings and water. Zuid-Limburg is genuinely hilly — 27 m at the Maas to 114 m on the plateau within the phase-1 box. |
 
 Everything above is open data. Keep attribution ("© OpenStreetMap contributors", "AHN", "3D BAG")
 in the game's about screen.
@@ -90,7 +90,7 @@ Tiles are static JSON served by nginx/Rails' static file server — no DB hit wh
 
 1. **Drive on terrain** — flat tiles, one car, WASD, chase camera. *(this scaffold)*
 2. **Real roads & buildings** — Overpass import for the phase-1 box; tiles stream. *(done: 6.3k roads, 60k buildings, street sign HUD)*
-3. **Real terrain** — AHN heights; buildings sit correctly on slopes.
+3. **Real terrain** — AHN heights; buildings sit correctly on slopes. *(done: `dem:fetch dem:build`, 10 m grid from PDOK WCS)*
 4. **Multiplayer** — see each other drive; name tags. *(channel + client already scaffolded)*
 5. **Feel** — sound, skid marks, better car model, day/night, collisions with buildings.
 6. **Game** — checkpoints between the villages, time trials, leaderboards (Solid Queue jobs),
@@ -120,10 +120,9 @@ Edit `config/database.yml` and set `adapter: postgis` for every environment.
 bin/rails db:create db:migrate
 bin/rails osm:fetch            # Overpass → data/osm/*.json  (phase-1 box, ~1–3 min)
 bin/rails osm:import           # → PostGIS
-# optional real terrain:
-#   download AHN DTM GeoTIFFs for the area (PDOK / ahn.nl), then
-#   gdalwarp -t_srs EPSG:28992 -tr 10 10 -r bilinear -te 177000 323000 200000 340000 \
-#       ahn_*.tif data/dem.tif && gdal_translate -of AAIGrid data/dem.tif data/dem.asc
+# real terrain (needs GDAL: brew install gdal):
+bin/rails dem:fetch            # AHN terrain model from PDOK WCS → data/dem_raw.tif (10 m, ~1 min)
+bin/rails dem:build            # fill holes, convert → data/dem.asc
 bin/rails tiles:build          # → public/tiles/*.json  (flat terrain if no dem.asc)
 bin/dev                        # Rails (Puma on :3000)
 ```
