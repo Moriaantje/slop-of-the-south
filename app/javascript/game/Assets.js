@@ -11,7 +11,7 @@ import { versioned } from "game/Textures"
 // Clip names (see CREDITS.md): dragon Fast_Flying / Flying_Idle / Headbutt / Punch / HitReact / Death; mech Idle /
 // Walk / Run / Jump / Shoot / Punch / Death; people Idle / Walk / Run / PickUp / Victory / Death.
 export const MODELS = {
-  dragon: { file: "dragon.glb", height: 7,    forward: Math.PI, color: 0x8b2f2a },
+  dragon: { file: "dragon.glb", height: 14,   forward: Math.PI, color: 0x8b2f2a },
   wizard: { file: "wizard.glb", height: 1.9,  forward: Math.PI, color: 0x3b2f6b },
   mech:   { file: "mech.glb",   height: 4.2,  forward: Math.PI, color: 0x4e5a6e },
   npc_a:  { file: "npc_a.glb",  height: 1.75, forward: Math.PI, color: 0x7a6a4f },

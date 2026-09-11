@@ -133,7 +133,7 @@ export class ChunkManager {
       const roads = buildRoads(data.roads, data.junctions, data.biome, (x, z) => terrain.heightAt(x, z))
       if (roads) group.add(roads)
       const roadIndex = indexRoads(data.roads, data.junctions ?? [])
-      const buildings = buildBuildings(data.buildings, reg)
+      const buildings = buildBuildings(withoutMeshed(data.buildings, data.meshes), reg)
       if (buildings) group.add(buildings)
       const meshes = buildBuildingMeshes(data.meshes, reg)
       if (meshes) group.add(meshes)
@@ -230,6 +230,35 @@ function roadHeight(index, x, z, terrain) {
   if (bestOut <= -EDGE) return on
   const k0 = (bestOut + EDGE) / (2 * EDGE), k = k0 * k0 * (3 - 2 * k0)   // smoothstep over the curb band
   return on + (ground - on) * k
+}
+
+// The fallback blocks (OSM footprints, LoD1.3 parts) that stand where a LoD2.2 mesh already stands: a few hundred per
+// province slipped through the importer's bag3d-wins rule and rendered as a flat-coloured box through the textured
+// house. Any footprint vertex or centroid inside a mesh footprint (or the other way round) drops the block.
+function withoutMeshed(buildings, meshes) {
+  if (!buildings?.length || !meshes?.length) return buildings ?? []
+  const fps = []
+  for (const m of meshes) for (const r of m.fp ?? []) if (r.length >= 6) fps.push(r)
+  return buildings.filter((b) => {
+    const fp = b.footprint
+    if (!fp || fp.length < 3) return true
+    let cx = 0, cz = 0
+    for (const p of fp) { cx += p[0]; cz += p[1] }
+    cx /= fp.length; cz /= fp.length
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity
+    for (const p of fp) { minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]); minZ = Math.min(minZ, p[1]); maxZ = Math.max(maxZ, p[1]) }
+    const flat = fp.flat()
+    for (const r of fps) {
+      // cheap reject on the boxes first
+      let rMinX = Infinity, rMaxX = -Infinity, rMinZ = Infinity, rMaxZ = -Infinity
+      for (let i = 0; i < r.length; i += 2) { rMinX = Math.min(rMinX, r[i]); rMaxX = Math.max(rMaxX, r[i]); rMinZ = Math.min(rMinZ, r[i + 1]); rMaxZ = Math.max(rMaxZ, r[i + 1]) }
+      if (rMaxX < minX || rMinX > maxX || rMaxZ < minZ || rMinZ > maxZ) continue
+      if (insideRing(cx, cz, r)) return false
+      for (const p of fp) if (insideRing(p[0], p[1], r)) return false
+      for (let i = 0; i < r.length; i += 2) if (insideRing(r[i], r[i + 1], flat)) return false
+    }
+    return true
+  })
 }
 
 // even-odd point-in-polygon over a flat [x, z, ...] ring

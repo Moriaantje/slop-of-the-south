@@ -25,9 +25,11 @@ module Game
       assert_in_delta LAIR.x, d.x, 0.01
       assert_in_delta 50.0 + Dragon::PERCH_H["castle"], d.y, 0.01
       assert_equal "dragon", d.snapshot[:kind]
-      advance(d, [], 241)
+      t = T
+      until d.state == :patrol || t > T + 100_000 do t += 250; d.step(t, []) end
       assert_equal :patrol, d.state
       assert d.awake?
+      4.times { t += 250; d.step(t, []) }
       assert_operator Math.hypot(d.x - LAIR.x, d.z - LAIR.z), :>, 0
     end
 
@@ -46,7 +48,7 @@ module Game
       d2.instance_variable_set(:@state, :breathe); d2.instance_variable_set(:@strip, strip)
       assert d2.scorches?(mid_x, mid_z)
       assert d2.scorches?(mid_x + strip[:uz] * 5, mid_z - strip[:ux] * 5)
-      refute d2.scorches?(mid_x + strip[:uz] * 8, mid_z - strip[:ux] * 8)
+      refute d2.scorches?(mid_x + strip[:uz] * (Dragon::STRIP_HALF_W + 2), mid_z - strip[:ux] * (Dragon::STRIP_HALF_W + 2))
       refute d2.scorches?(strip[:x1] + strip[:ux] * 10, strip[:z1] + strip[:uz] * 10)
     end
 
@@ -63,7 +65,7 @@ module Game
       d = dragon
       advance(d, [ prey ], 3)
       assert_equal :hunt, d.state
-      prey.x = LAIR.x + 3000                                    # gone far away
+      prey.x = LAIR.x + 5000                                    # gone far away
       advance(d, [ prey ], 1)
       assert_equal :return, d.state
       t = T
@@ -77,7 +79,7 @@ module Game
       r = d.strike(999, "p1", "fireball", T)
       assert_equal Dragon::MAX_HP - 60, r[:hp]
       refute r[:killed]
-      9.times { d.strike(60, "p2", "fireball", T) }
+      14.times { d.strike(60, "p2", "fireball", T) }
       assert_equal 0, d.hp
       refute d.alive?
       assert_equal %w[p1 p2], d.killed_by
@@ -152,12 +154,44 @@ module Game
         assert_equal "range", @actors.strike(far, "d1", 10, "fireball", T)
         assert_equal "kind", @actors.strike(near, "d1", 10, "poke", T)
         msg = @actors.strike(near, "d1", 500, "lightning", T)
-        assert_equal [ "strike", "d1", 555, "p1", false ], msg.values_at(:type, :dragon_id, :hp, :by, :killed)
+        assert_equal [ "strike", "d1", 855, "p1", false ], msg.values_at(:type, :dragon_id, :hp, :by, :killed)
         20.times { @actors.strike(near, "d1", 60, "fireball", T) }
         assert_equal "dead", @actors.strike(near, "d1", 60, "fireball", T)
         r = @actors.tick(T + 250, [ near ])
         assert_equal [ [ "o:w3", [ "p1" ] ] ], r[:kills]
       end
+    end
+  end
+end
+
+module Game
+  class DragonRaidTest < ActiveSupport::TestCase
+    T = 1_700_000_000_000
+    FLAT = ->(_x, _z) { 50.0 }
+
+    test "a patrolling dragon may raid a town within reach: one breath over the centre, then home" do
+      lair = FakeWorld::HUBS.find { _1.role == "lair" }
+      town = FakeWorld::HUBS.find { _1.key == "p:1" }                                    # 2 km from the lair
+      raided = false
+      # try a few seeds: the raid is a coin toss per patrol
+      (1..12).each do |seed|
+        d = Dragon.new("d1", lair, ground: FLAT, now: T, rng: Random.new(seed), towns: [ town ])
+        t, breaths = T, 0
+        until t > T + 600_000
+          t += 250
+          events = d.step(t, [])
+          breaths += events.count { _1[0] == :breath_start }
+          if d.state == :raid then raided = true end
+          break if raided && breaths.positive?
+        end
+        if raided && breaths.positive?
+          strip = d.strip || d.instance_variable_get(:@strip)
+          assert_equal :breathe, d.state
+          assert_operator Math.hypot(d.x - town.x, d.z - town.z), :<, 200, "breathes over the town"
+          break
+        end
+      end
+      assert raided, "no raid in twelve seeds"
     end
   end
 end

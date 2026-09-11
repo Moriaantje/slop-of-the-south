@@ -8,7 +8,7 @@ module Game
       HEARTBEAT_MS  = 2_000
       BURN_PER_TICK = 6.0            # hp per 4 Hz tick on the strip: 72 for a full breath
       HIT_SHARE     = 1.0 / 8        # of an object's hp per tick: gone after two seconds under the flame
-      STRIKE_RANGE  = 300.0
+      STRIKE_RANGE  = 400.0
       MAX           = 12
 
       attr_reader :dragons
@@ -16,7 +16,8 @@ module Game
       def initialize(hubs, ground: nil, corridor: Corridor, now: Game.now_ms)
         ground ||= ->(x, z) { rx, ry = World.to_rd(x, z); ::Geo::HeightGrid.current.sample(rx, ry) }
         lairs = hubs.values.select { _1.role == "lair" }.sort_by(&:key).first(MAX)
-        @dragons = lairs.each_with_index.map { |lair, i| Dragon.new("d#{i + 1}", lair, ground:, now:) }
+        towns = hubs.values.select { _1.role == "town" }
+        @dragons = lairs.each_with_index.map { |lair, i| Dragon.new("d#{i + 1}", lair, ground:, now:, towns:) }
         @corridor = corridor
         @strips = {}                 # dragon id → [[key, max], ...] under the current breath
         @kills = []                  # [[lair_key, [player ids]], ...] since the last tick

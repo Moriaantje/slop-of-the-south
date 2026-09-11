@@ -6,7 +6,7 @@ import { TUNING as T } from "game/Tuning"
 // of DayNight's material, so the uniforms can be copied over and the ground half dimmed) whenever the light has
 // changed enough or a few seconds have passed. Standard materials then get real ambient and specular response —
 // cars and water pick up the sky — without any per-frame cost. ?env=0 skips it.
-const REFRESH_MS = 5000, DARKNESS_STEP = 0.05
+const REFRESH_MS = 60000, DARKNESS_STEP = 0.04     // a PMREM bake is a visible hitch: only when the light moves, else once a minute
 
 export class SkyEnv {
   constructor(world, dayNight) {

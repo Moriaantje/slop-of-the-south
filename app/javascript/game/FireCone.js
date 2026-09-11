@@ -3,7 +3,7 @@ import * as THREE from "three"
 // A dragon's breath: an animated cone of fire from the mouth forward, the FlameWall shader folded around a cone.
 // One shared material (time uniform), one shared geometry: the cone points down -z from its apex at the origin so
 // it can be parented to the head and aimed by the parent. `set(on, dt)` fades it in and out.
-const LENGTH = 40, RADIUS = 6
+const LENGTH = 60, RADIUS = 8
 const geo = (() => {
   const g = new THREE.ConeGeometry(RADIUS, LENGTH, 24, 6, true)
   g.rotateX(-Math.PI / 2)                    // axis along -z … the cone's apex was at +y

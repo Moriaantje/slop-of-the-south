@@ -128,6 +128,19 @@ export class Destructibles {
   }
 
   groundOf(obj) { return this.heightAt((obj.minX + obj.maxX) / 2, (obj.minZ + obj.maxZ) / 2) }
+
+  // the roof under (x, z): the top of the highest standing building whose footprint holds the point and whose top is
+  // at or below maxY (a body already above it lands on it; one beside it drives past). null when there is none.
+  roofAt(x, z, maxY) {
+    let best = null
+    for (const obj of this.cells.get((Math.floor(x / CELL) + 1e5) * 262144 + (Math.floor(z / CELL) + 1e5)) ?? EMPTY) {
+      if (!obj.rings || obj.state !== 0 || x < obj.minX || x > obj.maxX || z < obj.minZ || z > obj.maxZ) continue
+      const top = this.groundOf(obj) + (obj.h ?? 3)
+      if (top > maxY || (best !== null && top <= best)) continue
+      if (obj.rings.some((ring) => pointInPolygon(x, z, ring))) best = top
+    }
+    return best
+  }
 }
 
 // ---- rubble ---------------------------------------------------------------------------------------------------

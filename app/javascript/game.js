@@ -186,6 +186,8 @@ async function main() {
   const timer = new THREE.Timer()
   let netTimer = 0, signTimer = 0, borderTimer = 0
   const heightAt = (x, z) => chunks.heightAt(x, z), tileIndex = (x, z) => chunks.tileIndex(x, z)
+  // the surface the player rests on: the terrain and roads, or the roof of a standing house the body is above
+  const surfaceAt = (x, z) => { const g = heightAt(x, z), r = index.roofAt(x, z, player.mesh.position.y + 0.8); return r !== null && r > g ? r : g }
   overlay.discovered = session.discovered
 
   function frame(now) {
@@ -219,7 +221,7 @@ async function main() {
       }
       player.integrate(dt, input)
       if (player.vy === null) combat.collide(player, dt)          // airborne bodies clear everything
-      player.settle(heightAt)
+      player.settle(surfaceAt)
       if (npcs.near && input.talk) { npcs.talkTo(npcs.near); net.send("quest", { verb: "talk", hub_key: npcs.near.hubKey, npc_id: npcs.near.id }) }   // E talks before it fires
       combat.abilities(player, input, dt)                         // the car's trick on E; a landing mech stomps
       spells.update(player, input, dt)                            // the mech's Q and F

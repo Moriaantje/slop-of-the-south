@@ -48,6 +48,7 @@ export class Combat {
       if (!hit) continue
       const { obj, nx, nz, depth } = hit
       if (car.vy !== null && !obj.rings) continue
+      if (obj.rings && car.mesh.position.y >= this.index.groundOf(obj) + (obj.h ?? 3) - 0.8) continue   // on its roof, not against its wall
       if (obj.state === 1) { car.speed *= 1 - 2.5 * dt; this.queue(obj, spec.clear * Math.abs(v) * 4 * dt); continue }
       if (spec.push && Math.abs(v) > spec.pushMin && (!spec.pushKinds || spec.pushKinds.includes(obj.kind))) { car.speed *= 1 - 1.5 * dt; this.queue(obj, spec.ram * Math.abs(v) * 10 * dt); this.effects.shake(0.05); continue }
       car.x += nx * depth; car.z += nz * depth

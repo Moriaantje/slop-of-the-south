@@ -7,32 +7,37 @@ module Game
   # a lost target flies home. Spells `strike` it; at zero hp it is dead for three minutes and comes back on the
   # perch. Heights are absolute: `ground` gives the terrain under any (x, z) in game units.
   class Dragon
-    MAX_HP       = 600.0
+    MAX_HP       = 900.0
     STRIKE_CAP   = { "fireball" => 60.0, "lightning" => 45.0 }.freeze
     PERCH_H      = { "castle" => 22.0, "ruins" => 12.0, "stadium" => 30.0, "industrial" => 40.0 }.freeze
-    PERCH_MS     = (90_000..240_000)
-    PATROL_MS    = (60_000..120_000)
-    HUNT_R       = 600.0
-    LOSE_R       = 800.0
-    BREATH_R     = 120.0                # this close and lined up: breathe
-    PATROL_SPEED, HUNT_SPEED, BREATH_SPEED, RETURN_SPEED, COOL_SPEED = 25.0, 38.0, 14.0, 30.0, 22.0
-    HUNT_ALT, COOL_ALT = 30.0, 60.0     # metres above ground
+    PERCH_MS     = (30_000..90_000)     # a short rest between flights: they are meant to be seen
+    PATROL_MS    = (120_000..300_000)
+    HUNT_R       = 800.0
+    LOSE_R       = 1_200.0
+    RAID_R       = 2_500.0              # a town this close to the lair may get a visit
+    RAID_CHANCE  = 0.5                  # per patrol
+    BREATH_R     = 140.0                # this close and lined up: breathe
+    PATROL_SPEED, HUNT_SPEED, BREATH_SPEED, RETURN_SPEED, COOL_SPEED = 28.0, 40.0, 16.0, 32.0, 24.0
+    HUNT_ALT, COOL_ALT = 35.0, 70.0     # metres above ground
     BREATH_MS    = 3_000
     COOLDOWN_MS  = 6_000
     MAX_BREATHS  = 3
-    STRIP_LEN    = 40.0
-    STRIP_HALF_W = 6.0
-    MOUTH        = 6.0                  # metres ahead of the body centre
+    STRIP_LEN    = 60.0
+    STRIP_HALF_W = 8.0
+    MOUTH        = 10.0                 # metres ahead of the body centre
     DEAD_MS      = 180_000
-    TURN_RATE    = 1.0                  # rad/s
-    CLIMB_RATE   = 12.0                 # m/s
+    TURN_RATE    = 0.9                  # rad/s
+    CLIMB_RATE   = 14.0                 # m/s
     MAX_DT       = 0.5                  # seconds; a stalled thread never teleports a dragon
     NAMES = %w[Vuurtong Sjaromme Aske Grieze Bombelke Knoevel Draoker Plamuur Sjoelke Gloeiend Roetsjer Vlamke].freeze
 
     attr_reader :id, :lair, :name, :x, :y, :z, :yaw, :pitch, :speed, :hp, :state, :target, :until_at, :strip, :breaths, :damaged_by, :killed_by
 
-    def initialize(id, lair, ground:, now: Game.now_ms, rng: Random.new(Zlib.crc32(lair.key)))
+    # towns: the Hub::Refs a patrolling dragon may raid (breathe over the centre once, then fly home)
+    def initialize(id, lair, ground:, now: Game.now_ms, rng: Random.new(Zlib.crc32(lair.key)), towns: [])
       @id, @lair, @ground, @rng = id, lair, ground, rng
+      @towns = towns.select { Math.hypot(_1.x - lair.x, _1.z - lair.z) <= RAID_R }
+      @raid = nil
       @name = "#{NAMES[rng.rand(NAMES.size)]} van #{lair.name}"
       @perch_h = PERCH_H.fetch(lair.kind, 18.0)
       @x, @z = lair.x.to_f, lair.z.to_f
@@ -62,6 +67,7 @@ module Game
         end
       when :patrol
         if (t = prey(sessions)) then hunt!(t, now)
+        elsif @raid && now >= @raid_at then raid!(now)
         elsif now >= @until_at then return!(now)
         else
           @angle += @dir * (PATROL_SPEED / @radius) * dt
@@ -77,6 +83,19 @@ module Game
           if dist(t) < BREATH_R && heading_error(px, pz).abs < 0.3
             breathe!(now)
             events << [ :breath_start, @strip ]
+          end
+        end
+      when :raid
+        if (t = prey(sessions)) then hunt!(t, now)
+        else
+          tx, tz = @raid.x, @raid.z
+          fly_towards(tx, tz, ground_at(tx, tz) + HUNT_ALT, HUNT_SPEED, dt)
+          if Math.hypot(tx - @x, tz - @z) < BREATH_R && heading_error(tx, tz).abs < 0.3
+            @breaths = MAX_BREATHS - 1                     # one breath over the town, then home
+            breathe!(now)
+            events << [ :breath_start, @strip ]
+          elsif Math.hypot(tx - @x, tz - @z) < 30          # overshot without lining up: give up
+            return!(now)
           end
         end
       when :breathe
@@ -126,7 +145,8 @@ module Game
 
     def snapshot
       { id: @id, kind: "dragon", name: @name, lair: @lair.key, state: @state.to_s, x: @x.round(1), y: @y.round(1), z: @z.round(1),
-        yaw: @yaw.round(3), pitch: @pitch.round(3), speed: @speed.round(1), hp: @hp.round, max: MAX_HP.round, target: @target, until: @until_at }
+        yaw: @yaw.round(3), pitch: @pitch.round(3), speed: @speed.round(1), hp: @hp.round, max: MAX_HP.round, target: @target, until: @until_at,
+        raid: @state == :raid ? @raid&.key : nil }
     end
 
     private
@@ -187,11 +207,20 @@ module Game
 
     def patrol!(now)
       @state = :patrol
-      @radius = 300.0 + @rng.rand * 500.0
-      @alt = 60.0 + @rng.rand * 60.0
+      @radius = 600.0 + @rng.rand * 900.0
+      @alt = 80.0 + @rng.rand * 70.0
       @dir = @rng.rand < 0.5 ? -1.0 : 1.0
       @angle = Math.atan2(@z - @lair.z, @x - @lair.x)
       @until_at = now + @rng.rand(PATROL_MS)
+      # maybe a raid on a town partway through the patrol
+      @raid = @towns.any? && @rng.rand < RAID_CHANCE ? @towns[@rng.rand(@towns.size)] : nil
+      @raid_at = now + (@until_at - now) / 2
+    end
+
+    def raid!(now)
+      @state = :raid
+      @target = nil
+      @until_at = nil
     end
 
     def hunt!(t, now)
@@ -217,6 +246,7 @@ module Game
     def return!(now)
       @state = :return
       @target = nil
+      @raid = nil
       @until_at = nil
     end
 

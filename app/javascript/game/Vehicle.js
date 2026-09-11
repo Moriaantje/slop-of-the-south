@@ -199,6 +199,9 @@ export class Vehicle {
   // Terrain contact and body attitude via the suspension; car.y stays the ground height under the centre, and an
   // airborne car floats its mesh above it until it comes back down
   settle(heightAt) {
+    // driven off a roof or a ledge: the surface drops away and the car falls instead of snapping down
+    const g = heightAt(this.x, this.z)
+    if (this.vy === null && this.y !== 0 && g < this.y - 1.2) { this.vy = 0; this.airY = this.y }
     this.susp.update(this, heightAt, this._dt)
     if (this.vy === null) return
     if (this.airY <= this.y && this.vy < 0) { this.vy = null; this.landed = true }

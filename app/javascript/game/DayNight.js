@@ -2,11 +2,13 @@ import * as THREE from "three"
 import { TUNING as T } from "game/Tuning"
 import { LOOK } from "game/TerrainTile"
 
-// A full day every 6 minutes, on the wall clock so every player shares the same time of day. Sunrise at 04:30,
+// A full day every 8 minutes, on the wall clock so every player shares the same time of day: the daylight hours
+// (03:45–22:15) take seven of them, the night (22:15–03:45) one, so a night is a short dark minute. Sunrise at 04:30,
 // solar noon at 13:00, sunset at 21:30 game time. The sun light swings east → south → west and fades out; the sky,
 // fog and hemisphere light darken to a moonlit blue; `darkness` (0 day … 1 night) drives street lamps, headlights
 // and sign reflectivity. ?time=23 in the URL freezes the clock at that hour (handy for looking at the night).
-export const DAY_SECONDS = 360
+export const DAY_SECONDS = 480
+const NIGHT_FROM = 22.25, NIGHT_TO = 3.75, NIGHT_SECONDS = 60      // wall seconds the dark hours take
 export const SUNRISE = 4.5, SUNSET = 21.5
 const SKY_DISTANCE = 3200                                    // inside the camera's far plane, beyond the loaded tiles
 
@@ -50,7 +52,7 @@ export class DayNight {
   // game hours 0..24
   hours() {
     if (this.fixedHours !== null) return this.fixedHours
-    return ((Date.now() / 1000) % DAY_SECONDS) / DAY_SECONDS * 24
+    return warpHours((Date.now() / 1000) % DAY_SECONDS)
   }
 
   clock() {
@@ -112,6 +114,14 @@ export class DayNight {
     this.env.zenith.copy(u.zenith.value); this.env.horizon.copy(u.horizon.value)
     return this.darkness
   }
+}
+
+// wall seconds into the day → game hours, the night compressed: the day starts at NIGHT_TO (03:45) and runs to
+// NIGHT_FROM (22:15) in DAY_SECONDS − NIGHT_SECONDS, then the night to 03:45 in NIGHT_SECONDS
+export function warpHours(s) {
+  const dayHours = NIGHT_FROM - NIGHT_TO, daySeconds = DAY_SECONDS - NIGHT_SECONDS
+  if (s < daySeconds) return NIGHT_TO + dayHours * (s / daySeconds)
+  return (NIGHT_FROM + (24 - dayHours) * ((s - daySeconds) / NIGHT_SECONDS)) % 24
 }
 
 const SKY_VERTEX = /* glsl */`

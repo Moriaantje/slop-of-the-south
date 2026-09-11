@@ -98,6 +98,7 @@ export class Mech {
     this.wading = depth > 0.3 && this.vy === null
     if (depth > M.drownDepth && this.vy === null) { this.drownT += dt; if (this.drownT > M.drownTime) this.drowned = true }
     else this.drownT = Math.max(0, this.drownT - dt)
+    if (this.vy === null && ground < this.y - 1.2 && this.y !== 0) { this.vy = 0; this.airY = this.y }   // walked off a roof: fall
     if (this.vy !== null) {
       if (this.airY <= ground && this.vy < 0) { this.vy = null; this.landed = true; this.y = ground }
       else { this.y = ground; this.place(this.airY); return }

@@ -18,7 +18,7 @@ export async function loadBitmap(url, { signal } = {}) {
   return createImageBitmap(blob, { imageOrientation: "flipY", colorSpaceConversion: "none", premultiplyAlpha: "none" })
 }
 
-export function bitmapTexture(bitmap, { srgb = true, repeat = null, anisotropy = 8 } = {}) {
+export function bitmapTexture(bitmap, { srgb = true, repeat = null, anisotropy = 4 } = {}) {
   const tex = new THREE.Texture(bitmap)
   tex.flipY = false
   tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace
