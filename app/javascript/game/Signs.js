@@ -56,11 +56,14 @@ export function buildSigns(signs, heightAt) {
 
 function rank(code) { return code.startsWith("OB") ? 1 : 0 }
 
+// sign sheeting is retro-reflective: faces stay readable in the dark
+export function setSignsNight(d) { for (const m of materials.values()) m.emissiveIntensity = 0.45 * d }
+
 function material(look) {
   if (materials.has(look.key)) return materials.get(look.key)
   const tex = new THREE.CanvasTexture(look.canvas)
   tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4
-  const mat = Object.assign(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, metalness: 0.05, transparent: true }), { __shared: true })
+  const mat = Object.assign(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, metalness: 0.05, transparent: true, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0 }), { __shared: true })
   materials.set(look.key, mat)
   return mat
 }

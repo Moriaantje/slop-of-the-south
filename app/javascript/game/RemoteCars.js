@@ -8,7 +8,19 @@ const TIMEOUT_MS = 6000
 export class RemoteCars {
   constructor(scene) {
     this.scene = scene
-    this.cars = new Map()    // id → { mesh, buf: [{t, x, y, z, yaw}], lastSeen }
+    this.cars = new Map()    // id → { mesh, buf: [{t, x, y, z, yaw}], lastSeen, brake }
+    this.darkness = 0
+  }
+
+  // darkness 0..1 (DayNight): headlights and tail lights of everyone else
+  setNight(darkness) {
+    this.darkness = darkness
+    for (const car of this.cars.values()) this.relight(car)
+  }
+
+  relight(car) {
+    car.mesh.userData.lights.head.emissiveIntensity = 0.35 + 2.2 * this.darkness
+    car.mesh.userData.lights.tail.emissiveIntensity = car.brake ? 1.9 : 0.12 + 0.7 * this.darkness
   }
 
   get count() { return this.cars.size }
@@ -19,10 +31,11 @@ export class RemoteCars {
     let car = this.cars.get(msg.id)
     if (!car) {
       const color = colorFor(msg.id)
-      car = { mesh: makeCarMesh(color), color, buf: [], lastSeen: 0 }
+      car = { mesh: makeCarMesh(color), color, buf: [], lastSeen: 0, brake: false }
       this.scene.add(car.mesh)
       this.cars.set(msg.id, car)
     }
+    if (!!msg.brake !== car.brake) { car.brake = !!msg.brake; this.relight(car) }
     car.lastSeen = performance.now()
     car.buf.push({ t: performance.now(), x: msg.x, y: msg.y, z: msg.z, yaw: msg.yaw })
     if (car.buf.length > 20) car.buf.shift()

@@ -10,6 +10,24 @@ const lampHead = Object.assign(new THREE.MeshStandardMaterial({ color: 0xdedcd0,
 const housing = Object.assign(new THREE.MeshStandardMaterial({ color: 0x1c1d1f, roughness: 0.7 }), { __shared: true })
 const lightMat = Object.assign(new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), { __shared: true })
 
+// the light on the ground under a lamp: a radial gradient disc, additive, faded in with the darkness
+const poolTexture = (() => {
+  const c = document.createElement("canvas"); c.width = c.height = 128
+  const ctx = c.getContext("2d"), g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64)
+  g.addColorStop(0, "rgba(255,255,255,0.9)"); g.addColorStop(0.35, "rgba(255,255,255,0.45)"); g.addColorStop(1, "rgba(255,255,255,0)")
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128)
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t
+})()
+const poolMat = { 6: 0xffa54a, 9: 0xd8e4ff }                                   // sodium orange on streets, LED white on main roads
+for (const h of Object.keys(poolMat)) poolMat[h] = Object.assign(new THREE.MeshBasicMaterial({ map: poolTexture, color: poolMat[h], transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }), { __shared: true })
+const poolGeometry = new THREE.CircleGeometry(1, 24); poolGeometry.rotateX(-Math.PI / 2); poolGeometry.__shared = true
+
+// darkness 0 (day) … 1 (night): lamp heads light up and the ground pools appear
+export function setNightLevel(d) {
+  lampHead.emissiveIntensity = 0.1 + 1.8 * d
+  for (const m of Object.values(poolMat)) m.opacity = 0.95 * d * d
+}
+
 const lampGeometry = {}, lampHeadGeometry = {}
 function lampParts(h) {
   if (!lampGeometry[h]) {
@@ -30,14 +48,19 @@ export function buildLamps(lamps, heightAt) {
   for (const [h, list] of byHeight) {
     const [poleGeo, headGeo] = lampParts(h)
     const poles = new THREE.InstancedMesh(poleGeo, grey, list.length), heads = new THREE.InstancedMesh(headGeo, lampHead, list.length)
+    const pools = new THREE.InstancedMesh(poolGeometry, poolMat[h] ?? poolMat[6], list.length)
+    const radius = h * 0.95, flat = new THREE.Quaternion(), ps = new THREE.Vector3(radius, 1, radius)
     list.forEach(([x, z, dir], i) => {
       q.setFromAxisAngle(up, -dir * Math.PI / 180)                       // forward (-z) → compass dir
       m.compose(p.set(x, heightAt(x, z) - 0.1, z), q, s)
       poles.setMatrixAt(i, m); heads.setMatrixAt(i, m)
+      const hx = x + Math.sin(dir * Math.PI / 180) * 1.3, hz = z - Math.cos(dir * Math.PI / 180) * 1.3   // under the head
+      pools.setMatrixAt(i, m.compose(p.set(hx, heightAt(hx, hz) + 0.2, hz), flat, ps))
     })
-    poles.instanceMatrix.needsUpdate = true; heads.instanceMatrix.needsUpdate = true
+    poles.instanceMatrix.needsUpdate = heads.instanceMatrix.needsUpdate = pools.instanceMatrix.needsUpdate = true
     poles.geometry.__shared = heads.geometry.__shared = true
-    group.add(poles, heads)
+    pools.renderOrder = 2
+    group.add(poles, heads, pools)
   }
   return group
 }

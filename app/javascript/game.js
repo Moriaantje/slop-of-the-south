@@ -1,7 +1,9 @@
 import * as THREE from "three"
 import { World } from "game/World"
 import { ChunkManager } from "game/ChunkManager"
-import { updateSignals } from "game/Furniture"
+import { updateSignals, setNightLevel } from "game/Furniture"
+import { setSignsNight } from "game/Signs"
+import { DayNight } from "game/DayNight"
 import { Vehicle } from "game/Vehicle"
 import { Input } from "game/Input"
 import { Network } from "game/Network"
@@ -28,6 +30,8 @@ async function main() {
   const input   = new Input()
   const car     = new Vehicle(config.spawn)
   const remotes = new RemoteCars(world.scene)
+  const dayNight = new DayNight(world)
+  const clockEl = document.getElementById("clock")
   const net     = new Network({ room: "main", playerId, onMessage: (m) => remotes.receive(m) })
   const locator = new Locator(config.places)
   const minimap = new Minimap(document.getElementById("minimap"), config, {
@@ -56,6 +60,8 @@ async function main() {
 
     chunks.update(car.x, car.z)
     updateSignals()
+    const darkness = dayNight.update()
+    car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)
     if (input.toggleMap) minimap.toggle()
     if (chunks.ready(car.x, car.z)) {
       if (input.reset) { car.reset(config.spawn); placed = false }
@@ -103,6 +109,7 @@ async function main() {
       placeEl.textContent = locator.place ?? ""
       placeEl.hidden = !locator.place
       biomeEl.textContent = chunks.biomeAt(car.x, car.z) ?? ""
+      clockEl.textContent = dayNight.clock()
     }
     minimap.update(car, remotes)
     

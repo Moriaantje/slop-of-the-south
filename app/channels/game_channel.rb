@@ -14,7 +14,7 @@ class GameChannel < ApplicationCable::Channel
     broadcast(type: "leave")
   end
 
-  # data: { x, y, z, yaw, speed }
+  # data: { x, y, z, yaw, speed, brake }
   def move(data)
     now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     return if now - @last_move_at < 1.0 / MAX_RATE_HZ
@@ -23,7 +23,7 @@ class GameChannel < ApplicationCable::Channel
     broadcast(
       type: "move", name: @name,
       x: data["x"].to_f, y: data["y"].to_f, z: data["z"].to_f,
-      yaw: data["yaw"].to_f, speed: data["speed"].to_f,
+      yaw: data["yaw"].to_f, speed: data["speed"].to_f, brake: data["brake"] == true,
       t: (Time.now.to_f * 1000).to_i
     )
   end

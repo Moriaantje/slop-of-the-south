@@ -16,10 +16,10 @@ export class World {
 
     this.camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.5, 4000)
 
-    const hemi = new THREE.HemisphereLight(0xdfe9f3, 0x5b6b4a, 0.9)
-    const sun  = new THREE.DirectionalLight(0xfff2dc, 1.6)
-    sun.position.set(-300, 500, -200)                // afternoon sun from the south-west
-    this.scene.add(hemi, sun)
+    this.hemi = new THREE.HemisphereLight(0xdfe9f3, 0x5b6b4a, 0.9)
+    this.sun  = new THREE.DirectionalLight(0xfff2dc, 1.6)
+    this.sun.position.set(-300, 500, -200)           // afternoon sun from the south-west; DayNight moves it
+    this.scene.add(this.hemi, this.sun)
 
     this._camTarget = new THREE.Vector3()
     this._lookAt = new THREE.Vector3()

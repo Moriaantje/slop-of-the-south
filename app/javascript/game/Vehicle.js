@@ -10,8 +10,29 @@ export class Vehicle {
     this.brakeForce = 20
     this.maxSteer = 0.55        // radians at standstill
     this.mesh = makeCarMesh()
+    this.lights = this.mesh.userData.lights
+    this.braking = false
+    this.darkness = 0
+    // two spotlights for the player's own car light up the road ahead at night
+    this.spots = [-0.6, 0.6].map((x) => {
+      const spot = new THREE.SpotLight(0xfff3d6, 0, 65, 0.5, 0.65, 1.7)
+      spot.position.set(x, 0.7, -2.0)
+      spot.target.position.set(x * 0.7, -0.6, -24)
+      this.mesh.add(spot, spot.target)
+      return spot
+    })
     this.reset(spawn)
   }
+
+  // darkness 0..1 (DayNight): headlights on in the dark, dim running lights by day
+  setNight(darkness) {
+    this.darkness = darkness
+    for (const spot of this.spots) spot.intensity = 140 * darkness * darkness
+    this.lights.head.emissiveIntensity = 0.35 + 2.2 * darkness
+    this.updateTail()
+  }
+
+  updateTail() { this.lights.tail.emissiveIntensity = this.braking ? 1.9 : 0.12 + 0.7 * this.darkness }
 
   reset(spawn) {
     this.x = spawn.x; this.z = spawn.z; this.y = 0
@@ -26,6 +47,8 @@ export class Vehicle {
     let a = input.throttle * this.accel - drag
     if (input.brake) a -= this.speed > 0.5 ? this.brakeForce : this.accel * 0.6   // brake, then reverse
     if (input.handbrake) a -= 12 * Math.sign(this.speed)
+    const braking = (input.brake && this.speed > 0.5) || (input.handbrake && Math.abs(this.speed) > 0.5)
+    if (braking !== this.braking) { this.braking = braking; this.updateTail() }
     this.speed = THREE.MathUtils.clamp(this.speed + a * dt, -this.maxSpeed / 4, this.maxSpeed)
     if (Math.abs(this.speed) < 0.05 && !input.throttle && !input.brake) this.speed = 0
 
@@ -50,7 +73,7 @@ export class Vehicle {
     this.mesh.rotation.set(Math.atan2(hf - hb, this.wheelbase), this.yaw, Math.atan2(hr - hl, this.track), "YXZ")
   }
 
-  state() { return { x: this.x, y: this.y, z: this.z, yaw: this.yaw, speed: this.speed } }
+  state() { return { x: this.x, y: this.y, z: this.z, yaw: this.yaw, speed: this.speed, brake: this.braking } }
 }
 
 export function makeCarMesh(color = 0xd7412b) {
@@ -64,5 +87,14 @@ export function makeCarMesh(color = 0xd7412b) {
   for (const [x, z] of [[-0.85, 1.3], [0.85, 1.3], [-0.85, -1.3], [0.85, -1.3]]) {
     const w = new THREE.Mesh(wheel, dark); w.position.set(x, 0.33, -z); g.add(w)
   }
+  // lights: headlights at the front (-z), tail/brake lights at the back; their emissive intensity is animated
+  const head = new THREE.MeshStandardMaterial({ color: 0xfff8e6, emissive: 0xfff3cc, emissiveIntensity: 0.35, roughness: 0.3 })
+  const tail = new THREE.MeshStandardMaterial({ color: 0x7a1010, emissive: 0xff1a12, emissiveIntensity: 0.12, roughness: 0.4 })
+  const lamp = new THREE.BoxGeometry(0.34, 0.16, 0.06)
+  for (const x of [-0.6, 0.6]) {
+    const h = new THREE.Mesh(lamp, head); h.position.set(x, 0.62, -2.06); g.add(h)
+    const t = new THREE.Mesh(lamp, tail); t.position.set(x, 0.66, 2.06); g.add(t)
+  }
+  g.userData.lights = { head, tail }
   return g
 }

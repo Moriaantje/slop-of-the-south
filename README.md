@@ -1,4 +1,6 @@
-# Mijnstreek Drive
+# Slop of the South
+
+_(formerly Mijnstreek Drive; the Rails module is still `MijnstreekDrive`)_
 
 A multiplayer arcade driving game set in the Westelijke Mijnstreek (Sittard, Geleen, Beek, Neerbeek,
 Stein, Urmond, Brunssum and everything in between), built from real geodata.
@@ -73,6 +75,16 @@ in the game's about screen.
                                             └── biome            "akkerland" | "woonwijk" | …
 
 Tiles are static JSON served by nginx/Rails' static file server — no DB hit while playing.
+
+### 1.4a Time of day
+
+A full day takes 12 real minutes (`game/DayNight.js`, `DAY_SECONDS`), on the wall clock so every player sees the same
+time; the HUD shows the game clock. Sunrise 06:00, noon 12:00, sunset 18:00, twilight until about 19:00. The sun
+light swings east → south → west and gives way to a faint moon; sky, fog and hemisphere light darken with it. A
+`darkness` value (0 day … 1 night) switches on the street lamps (glowing heads plus an additive light pool on the
+ground, sodium orange on streets, LED white on main roads), makes sign faces retro-reflective and turns on car lights:
+two spotlights on the player's car, emissive headlights and tail lights on every car, brake lights while braking
+(the brake flag travels with the position over Action Cable). `?time=22.5` freezes the clock at that hour.
 
 ### 1.5 Multiplayer
 
