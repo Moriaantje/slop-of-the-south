@@ -110,8 +110,8 @@ function buildVariant(kind, seed) {
     // the crown: cards around every tip and filling the hull between them
     const centre = new THREE.Vector3(); for (const t of tips) centre.add(t); centre.divideScalar(tips.length || 1)
     const spread = kind === 3 ? 0.2 : 0.17
-    for (const t of tips) for (let k = 0; k < 7; k++) card(cards, rnd, t.clone().add(randomIn(rnd, spread * 0.6)), spread * (0.9 + rnd() * 0.5), centre)
-    for (let k = 0; k < tips.length * 3; k++) card(cards, rnd, centre.clone().add(randomIn(rnd, spread * 1.8)), spread * (0.9 + rnd() * 0.4), centre)
+    for (const t of tips) for (let k = 0; k < 4; k++) card(cards, rnd, t.clone().add(randomIn(rnd, spread * 0.6)), spread * (1.1 + rnd() * 0.5), centre)
+    for (let k = 0; k < tips.length * 1.5; k++) card(cards, rnd, centre.clone().add(randomIn(rnd, spread * 1.8)), spread * (1.1 + rnd() * 0.4), centre)
   }
   // normalise height over both meshes
   let maxY = 0
@@ -172,7 +172,7 @@ function conifer(wood, cards, rnd, bark) {
   const tiers = 7
   for (let t = 0; t < tiers; t++) {
     const y = 0.18 + t * 0.78 / tiers, r = 0.26 * (1 - t / (tiers + 0.8))
-    const count = 6 + Math.floor(rnd() * 3)
+    const count = 4 + Math.floor(rnd() * 2)
     for (let i = 0; i < count; i++) {
       const a = i / count * Math.PI * 2 + rnd() * 0.5
       const at = new THREE.Vector3(Math.cos(a) * r * 0.6, y + rnd() * 0.04, Math.sin(a) * r * 0.6)

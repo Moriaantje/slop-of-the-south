@@ -128,14 +128,14 @@ ${photo ? "\tfloat lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));\n\tdi
 \tfloat det = texture2D(uDetail, vDetailUv).r;
 \tfloat det2 = texture2D(uDetail, vDetailUv * 3.7 + 0.31).r;                       // a finer octave against visible repeats
 \tfloat grain = mix(0.5, det * 0.7 + det2 * 0.3, detailW);
-\tdiffuseColor.rgb *= 0.72 + 0.56 * grain;
+\tdiffuseColor.rgb *= 0.86 + 0.28 * grain;
 \tif (uGrassOn > 0.5) {
 \t\tvec3 ph = diffuseColor.rgb;
 \t\tfloat green = clamp((ph.g - max(ph.r, ph.b)) * 10.0 + 0.2, 0.0, 1.0) * step(0.06, ph.g);   // how much this pixel is grass
 \t\tgrassW = green * (1.0 - smoothstep(35.0, 95.0, length(vViewPosition)));
-\t\tvec3 g = texture2D(uGrass, vGrassUv).rgb;
+\t\tvec3 g = mix(texture2D(uGrass, vGrassUv).rgb, texture2D(uGrass, vGrassUv.yx * 0.23 + 0.5).rgb, 0.45);   // two scales: no visible repeat
 \t\tfloat plum = dot(ph, vec3(0.3, 0.5, 0.2)) / 0.32;                                    // the photo's brightness keeps the patches
-\t\tdiffuseColor.rgb = mix(ph, g * clamp(plum, 0.55, 1.5) * vec3(0.92, 1.0, 0.85), grassW);
+\t\tdiffuseColor.rgb = mix(ph, g * clamp(plum, 0.6, 1.4) * vec3(0.95, 1.0, 0.9), grassW * 0.75);
 \t}`)
       .replace("#include <normal_fragment_begin>", `#include <normal_fragment_begin>
 \t{

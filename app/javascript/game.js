@@ -85,6 +85,7 @@ async function main() {
     shaderErrors.push(log.slice(0, 300)); console.error("shader:", log)
   }
   let frames = 0, fps = 0, fpsT = performance.now()
+  world.renderer.info.autoReset = false                       // the readout sums every pass of the frame
   const shadow  = new Blob(world.scene)                      // the contact shadow under the player
   const loading = new LoadingScreen(el("laden"))
   const burnEl = el("burn")
@@ -213,6 +214,7 @@ async function main() {
     timer.update(now)
     const dt = Math.min(timer.getDelta(), 1 / 20)
 
+    world.renderer.info.reset()
     chunks.update(car.x, car.z)
     updateSignals()
     // the sun's shadow map is centred a little ahead of the player, stepped in 4 m so the shadows do not swim
@@ -222,7 +224,7 @@ async function main() {
     clouds.update(dt, world.camera, dayNight.env)
     TREE_UNIFORMS.uTime.value += dt; GRASS_UNIFORMS.uTime.value += dt
     TREE_UNIFORMS.uSunDir.value.copy(dayNight.env.sunDir)
-    grass.update(chunks.tiles, ...chunks.tileIndex(car.x, car.z))
+    grass.update(chunks.tiles, ...chunks.tileIndex(car.x, car.z), car.x, car.z)
     car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)
     updateWater(dayNight.env, timer.getElapsed())
     if (input.toggleMap) minimap.toggle()

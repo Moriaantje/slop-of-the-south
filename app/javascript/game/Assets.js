@@ -17,20 +17,22 @@ export const MODELS = {
   npc_b:  { file: "npc_b.glb",  height: 1.75, forward: Math.PI, color: 0x5f7a4f },
   npc_c:  { file: "npc_c.glb",  height: 1.75, forward: Math.PI, color: 0x7a4f5f },
   // the town props (Props.js): CC0 kit pieces under public/models/props, sized in metres; a missing file draws nothing
+  // Kenney kits are about 1 unit ≈ 2 m: heights are the metres the piece should stand
   well:     { file: "props/well.glb",     height: 2.6, forward: 0, prop: true },
-  stall:    { file: "props/stall.glb",    height: 3.0, forward: 0, prop: true },
+  stall:    { file: "props/stall.glb",    height: 2.7, forward: 0, prop: true },
   barrel:   { file: "props/barrel.glb",   height: 0.9, forward: 0, prop: true },
-  crate:    { file: "props/crate.glb",    height: 0.8, forward: 0, prop: true },
-  lantern:  { file: "props/lantern.glb",  height: 3.4, forward: 0, prop: true },
+  crate:    { file: "props/crate.glb",    height: 0.6, forward: 0, prop: true },
+  lantern:  { file: "props/lantern.glb",  height: 3.2, forward: 0, prop: true },
   bench:    { file: "props/bench.glb",    height: 0.9, forward: 0, prop: true },
-  fence:    { file: "props/fence.glb",    height: 1.1, forward: 0, prop: true },
-  planter:  { file: "props/planter.glb",  height: 0.7, forward: 0, prop: true },
-  cart:     { file: "props/cart.glb",     height: 1.7, forward: 0, prop: true },
-  sign:     { file: "props/sign.glb",     height: 2.3, forward: 0, prop: true },
-  hay:      { file: "props/hay.glb",      height: 1.2, forward: 0, prop: true },
+  fence:    { file: "props/fence.glb",    height: 0.9, forward: 0, prop: true },
+  planter:  { file: "props/planter.glb",  height: 0.8, forward: 0, prop: true },
+  cart:     { file: "props/cart.glb",     height: 1.1, forward: 0, prop: true },
+  sign:     { file: "props/sign.glb",     height: 1.9, forward: 0, prop: true },
+  hay:      { file: "props/hay.glb",      height: 0.8, forward: 0, prop: true },
   bush:     { file: "props/bush.glb",     height: 1.1, forward: 0, prop: true },
-  fountain: { file: "props/fountain.glb", height: 3.2, forward: 0, prop: true },
+  fountain: { file: "props/fountain.glb", height: 1.3, forward: 0, prop: true },
   wall:     { file: "props/wall.glb",     height: 1.2, forward: 0, prop: true },
+  tree:     { file: "props/tree.glb",     height: 4.5, forward: 0, prop: true },
 }
 
 export class Assets {
@@ -120,7 +122,8 @@ function normalise(gltf, spec) {
     const fix = (m) => {
       // KHR_materials_unlit (the mech, the wizard) arrives as MeshBasicMaterial: relight it with the same texture
       if (m.isMeshBasicMaterial) { const std = new THREE.MeshStandardMaterial({ map: m.map, color: m.color, roughness: 0.75, metalness: 0.05, side: m.side, transparent: m.transparent, alphaTest: m.alphaTest }); std.name = m.name; return std }
-      if (m.metalness > 0.6) m.metalness = 0.4
+      if (spec.prop) { m.metalness = 0; m.roughness = Math.max(m.roughness ?? 0.7, 0.65) }   // kit palettes come with FBX metalness
+      else if (m.metalness > 0.6) m.metalness = 0.4
       return m
     }
     o.material = Array.isArray(o.material) ? o.material.map(fix) : fix(o.material)

@@ -5,7 +5,7 @@ import * as THREE from "three"
 // instanced crosses of two alpha-tested quads carrying a canvas-painted tuft (three kinds: grass, grass with
 // daisies, tall meadow with poppies), tinted per tuft, swaying in the vertex shader and fading out past 120 m.
 // Placement runs a few thousand points per frame so a tile never hitches; beyond two tiles the layer is dropped.
-const SPACING = 3.2, JITTER = 1.4, FADE_NEAR = 90, FADE_FAR = 140, PER_FRAME = 2500, KEEP_TILES = 1
+const SPACING = 4.2, JITTER = 1.8, FADE_NEAR = 80, FADE_FAR = 130, PER_FRAME = 2500, KEEP_TILES = 1, CELL = 100
 export const GRASS_UNIFORMS = { uTime: { value: 0 } }
 
 const geometry = (() => {
@@ -56,7 +56,8 @@ export class Grass {
   }
 
   // tile: { key, tx, ty, terrain, roadIndex, water, objects, coverClass: { data, n } }, near: within KEEP_TILES of the player
-  update(tiles, cx, cy) {
+  update(tiles, cx, cy, viewX = 0, viewZ = 0) {
+    this.viewX = viewX; this.viewZ = viewZ
     for (const t of tiles.values()) {
       if (t.loading) continue
       const near = Math.max(Math.abs(t.tx - cx), Math.abs(t.ty - cy)) <= KEEP_TILES
@@ -65,6 +66,12 @@ export class Grass {
       else if (!near && have) this.drop(t.key)
     }
     for (const [key] of this.layers) if (!tiles.has(key)) this.drop(key)
+    // only the cells within sight draw: everything else is skipped before the GPU ever sees it
+    this.px = this.px ?? 0
+    for (const layer of this.layers.values()) if (layer.group) for (const cell of layer.group.children) {
+      const d = Math.hypot(cell.userData.cx - this.viewX, cell.userData.cz - this.viewZ)
+      cell.visible = d < FADE_FAR + CELL * 0.71
+    }
     // a slice of placement work per frame
     let budget = PER_FRAME
     while (budget > 0 && this.jobs.length) {
@@ -116,21 +123,31 @@ export class Grass {
     if (!layer) return
     const group = new THREE.Group()
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), c = new THREE.Color()
+    const ox = job.tile.terrain.ox, oz = job.tile.terrain.oz, n = Math.ceil(500 / CELL)
     job.pts.forEach((pts, kind) => {
-      const count = pts.length / 4
-      if (!count) return
-      const mesh = new THREE.InstancedMesh(geometry, material(kind), count)
-      for (let i = 0; i < count; i++) {
-        const x = pts[i * 4], y = pts[i * 4 + 1], z = pts[i * 4 + 2], lush = pts[i * 4 + 3]
-        q.setFromAxisAngle(up, hash(x * 0.37 + z * 0.91) * Math.PI)
-        const h = (kind === 2 ? 0.9 : 0.55) * (0.8 + 0.4 * hash(x + z))
-        mesh.setMatrixAt(i, m.compose(p.set(x, y - 0.02, z), q, s.set(h * 2.4, h, h * 2.4)))
-        mesh.setColorAt(i, c.setRGB(0.85 + 0.2 * hash(z - x), 0.85 + 0.3 * lush * hash(x * 1.3), 0.8))
+      // split the tile's tufts into CELL-sized groups so distance culling can skip whole patches
+      const cells = new Map()
+      for (let i = 0; i < pts.length; i += 4) {
+        const k = Math.floor((pts[i] - ox) / CELL) + n * Math.floor((pts[i + 2] - oz) / CELL)
+        if (!cells.has(k)) cells.set(k, [])
+        cells.get(k).push(i)
       }
-      mesh.instanceMatrix.needsUpdate = true; mesh.instanceColor.needsUpdate = true
-      mesh.receiveShadow = true
-      mesh.frustumCulled = false
-      group.add(mesh)
+      for (const [k, idx] of cells) {
+        const mesh = new THREE.InstancedMesh(geometry, material(kind), idx.length)
+        idx.forEach((i, j) => {
+          const x = pts[i], y = pts[i + 1], z = pts[i + 2], lush = pts[i + 3]
+          q.setFromAxisAngle(up, hash(x * 0.37 + z * 0.91) * Math.PI)
+          const h = (kind === 2 ? 0.9 : 0.55) * (0.8 + 0.4 * hash(x + z))
+          mesh.setMatrixAt(j, m.compose(p.set(x, y - 0.02, z), q, s.set(h * 2.4, h, h * 2.4)))
+          mesh.setColorAt(j, c.setRGB(0.85 + 0.2 * hash(z - x), 0.85 + 0.3 * lush * hash(x * 1.3), 0.8))
+        })
+        mesh.instanceMatrix.needsUpdate = true; mesh.instanceColor.needsUpdate = true
+        mesh.receiveShadow = true
+        mesh.frustumCulled = false
+        mesh.userData.cx = ox + ((k % n) + 0.5) * CELL; mesh.userData.cz = oz + (Math.floor(k / n) + 0.5) * CELL
+        mesh.visible = false
+        group.add(mesh)
+      }
     })
     layer.group = group
     this.scene.add(group)

@@ -27,4 +27,8 @@ Slop of the South is built from open data and open assets. Keep these credits wi
   `wizard.glb` = Wizard from the RPG Character pack (Idle, Walk, Run, Spell1, Spell2, Staff_Attack …);
   `npc_a/b/c.glb` = Casual_Male, Casual_Female, OldClassy_Male from the Ultimate Animated Character pack (Idle, Walk,
   Run, PickUp, Victory, SitDown, Death …). Pack pages: quaternius.com/packs/{ultimatemonsters,animatedmech,rpgcharacters,ultimatedanimatedcharacter}.html
+- **Kenney** (kenney.nl) — town props under `public/models/props/`, CC0: Fantasy Town Kit 2.0 (stall, fountain, lantern,
+  cart, tree, hedge as bush, fence), Survival Kit (crate, sign post), Mini Dungeon (barrel), Graveyard Kit 5.0 (stone
+  wall, bench, hay bale), Nature Kit (the planter, composed from a pot and flowers). Palette textures embedded.
+- **Quaternius** — the well (Medieval Village pack, CC0, via poly.pizza).
 - **three.js** — MIT.

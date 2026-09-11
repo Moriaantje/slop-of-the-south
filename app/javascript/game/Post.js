@@ -13,9 +13,10 @@ import { TUNING as T } from "game/Tuning"
 // (Jimenez et al. 2016, three's GTAOPass with its Poisson denoiser) darkens the foot of every wall, the underside of
 // every eave and the gap between things; a soft bloom lifts the sun, the lit windows and the fire; a grade pass adds
 // filmic contrast, a little saturation, warm highlights against cool shadows and a vignette; the output pass does
-// ACES and sRGB last, then SMAA (Jimenez et al. 2012) to clean the remaining edges. Rendered at the device ratio (up
-// to 1.5) into a 4× multisampled target; the AO works at half resolution and is upsampled in the blend.
-// ?post=0 falls back to the plain renderer.
+// ACES and sRGB last, then SMAA (Jimenez et al. 2012) to clean the remaining edges. Rendered at device ratio 1 into
+// a 4× multisampled target — post costs fill rate per pixel, and MSAA plus SMAA give the edges back for a fraction
+// of what a 1.5× buffer costs; the AO works at half resolution and is upsampled in the blend. ?post=0 falls back to
+// the plain renderer.
 const GRADE = {
   uniforms: { tDiffuse: { value: null }, uContrast: { value: 1.08 }, uSaturation: { value: 1.12 }, uWarm: { value: 0.06 }, uVignette: { value: 0.28 }, uLift: { value: 0.0 } },
   vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
@@ -42,6 +43,7 @@ export class Post {
     this.world = world
     if (!this.enabled) return
     const r = world.renderer
+    r.setPixelRatio(1)
     const size = r.getDrawingBufferSize(new THREE.Vector2())
     const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 })
     this.composer = new EffectComposer(r, target)
@@ -49,8 +51,8 @@ export class Post {
     this.ao = new GTAOPass(world.scene, world.camera, Math.round(size.x / 2), Math.round(size.y / 2))
     this.ao.output = GTAOPass.OUTPUT.Default
     Object.assign(this.ao.gtaoMaterial.uniforms, {})
-    this.ao.updateGtaoMaterial({ radius: 2.2, distanceExponent: 1.5, thickness: 1.0, distanceFallOff: 1.0, scale: 1.4, samples: 12, screenSpaceRadius: false })
-    this.ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 4, rings: 2, samples: 12 })
+    this.ao.updateGtaoMaterial({ radius: 2.2, distanceExponent: 1.5, thickness: 1.0, distanceFallOff: 1.0, scale: 1.4, samples: 8, screenSpaceRadius: false })
+    this.ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 4, rings: 1, samples: 8 })
     this.ao.blendIntensity = T.look.post.ao
     this.composer.addPass(this.ao)
     // The AO pass draws depth and normals with an override material that knows nothing of alpha: every sprite, leaf
@@ -61,7 +63,7 @@ export class Post {
     const aoRender = this.ao.render.bind(this.ao)
     this.ao.render = (...args) => { world.camera.layers.disable(1); aoRender(...args); world.camera.layers.enable(1) }
     this.frame = 0
-    this.bloom = new UnrealBloomPass(size, T.look.post.bloom, 0.55, 0.9)
+    this.bloom = new UnrealBloomPass(size.clone().multiplyScalar(0.5), T.look.post.bloom, 0.55, 0.9)
     this.composer.addPass(this.bloom)
     this.grade = new ShaderPass(GRADE)
     this.composer.addPass(this.grade)
