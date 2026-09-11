@@ -4,7 +4,7 @@
 namespace :assets do
   SETS = { "asphalt" => "Asphalt012", "klinker" => "PavingStones085", "pavers" => "PavingStones070", "gravel" => "Gravel022",
            "concrete" => "Concrete034", "brick" => "Bricks059", "brick2" => "Bricks090", "plaster" => "Plaster001",
-           "rooftile" => "RoofingTiles005" }.freeze
+           "rooftile" => "RoofingTiles005", "grass" => "Grass004" }.freeze
 
   desc "Download the ambientCG material sets into public/textures"
   task textures: :environment do

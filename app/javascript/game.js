@@ -221,6 +221,7 @@ async function main() {
     skyEnv.update(now)
     clouds.update(dt, world.camera, dayNight.env)
     TREE_UNIFORMS.uTime.value += dt; GRASS_UNIFORMS.uTime.value += dt
+    TREE_UNIFORMS.uSunDir.value.copy(dayNight.env.sunDir)
     grass.update(chunks.tiles, ...chunks.tileIndex(car.x, car.z))
     car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)
     updateWater(dayNight.env, timer.getElapsed())

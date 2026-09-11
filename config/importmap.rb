@@ -31,3 +31,6 @@ pin "three/addons/shaders/GTAOShader.js", to: "three--addons--shaders--GTAOShade
 pin "three/addons/shaders/LuminosityHighPassShader.js", to: "three--addons--shaders--LuminosityHighPassShader.js" # @0.186.0
 pin "three/addons/shaders/OutputShader.js", to: "three--addons--shaders--OutputShader.js" # @0.186.0
 pin "three/addons/shaders/PoissonDenoiseShader.js", to: "three--addons--shaders--PoissonDenoiseShader.js" # @0.186.0
+pin "three/addons/postprocessing/SMAAPass.js", to: "three--addons--postprocessing--SMAAPass.js" # @0.186.0
+pin "three/addons/shaders/SMAAShader.js", to: "three--addons--shaders--SMAAShader.js" # @0.186.0
+pin "three/addons/objects/Sky.js", to: "three--addons--objects--Sky.js" # @0.186.0

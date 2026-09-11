@@ -5,6 +5,7 @@ import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js"
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
+import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js"
 import { off } from "game/Flags"
 import { TUNING as T } from "game/Tuning"
 
@@ -12,8 +13,9 @@ import { TUNING as T } from "game/Tuning"
 // (Jimenez et al. 2016, three's GTAOPass with its Poisson denoiser) darkens the foot of every wall, the underside of
 // every eave and the gap between things; a soft bloom lifts the sun, the lit windows and the fire; a grade pass adds
 // filmic contrast, a little saturation, warm highlights against cool shadows and a vignette; the output pass does
-// ACES and sRGB last. Rendered at device ratio 1 into a 4× multisampled target (post costs fill rate; MSAA keeps the
-// edges). ?post=0 falls back to the plain renderer.
+// ACES and sRGB last, then SMAA (Jimenez et al. 2012) to clean the remaining edges. Rendered at the device ratio (up
+// to 1.5) into a 4× multisampled target; the AO works at half resolution and is upsampled in the blend.
+// ?post=0 falls back to the plain renderer.
 const GRADE = {
   uniforms: { tDiffuse: { value: null }, uContrast: { value: 1.08 }, uSaturation: { value: 1.12 }, uWarm: { value: 0.06 }, uVignette: { value: 0.28 }, uLift: { value: 0.0 } },
   vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
@@ -40,12 +42,11 @@ export class Post {
     this.world = world
     if (!this.enabled) return
     const r = world.renderer
-    r.setPixelRatio(1)
     const size = r.getDrawingBufferSize(new THREE.Vector2())
     const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 })
     this.composer = new EffectComposer(r, target)
     this.composer.addPass(new RenderPass(world.scene, world.camera))
-    this.ao = new GTAOPass(world.scene, world.camera, size.x, size.y)
+    this.ao = new GTAOPass(world.scene, world.camera, Math.round(size.x / 2), Math.round(size.y / 2))
     this.ao.output = GTAOPass.OUTPUT.Default
     Object.assign(this.ao.gtaoMaterial.uniforms, {})
     this.ao.updateGtaoMaterial({ radius: 2.2, distanceExponent: 1.5, thickness: 1.0, distanceFallOff: 1.0, scale: 1.4, samples: 12, screenSpaceRadius: false })
@@ -65,6 +66,8 @@ export class Post {
     this.grade = new ShaderPass(GRADE)
     this.composer.addPass(this.grade)
     this.composer.addPass(new OutputPass())
+    this.smaa = new SMAAPass()
+    this.composer.addPass(this.smaa)
     addEventListener("resize", () => this.resize())
   }
 
@@ -72,7 +75,7 @@ export class Post {
     if (!this.enabled) return
     const size = this.world.renderer.getDrawingBufferSize(new THREE.Vector2())
     this.composer.setSize(size.x, size.y)
-    this.ao.setSize(size.x, size.y)
+    this.ao.setSize(Math.round(size.x / 2), Math.round(size.y / 2))
   }
 
   // darkness 0..1: bloom bites harder at night (lit windows, fire), the AO a little less

@@ -1,12 +1,28 @@
 import * as THREE from "three"
-import { disposeTexture } from "game/Textures"
+import { disposeTexture, loadBitmap, bitmapTexture, versioned, pbrEnabled } from "game/Textures"
 
 // Saturation and gain applied to the aerial photo: it carries baked sunlight already, so under the scene's own sun
 // and tone mapping it washes out; a little less gain and a little more colour bring it next to the painted palette.
 // Shared uniform objects, tweakable live through TUNING.look (DayNight copies them every frame). uDark is the
 // night (0 day … 1 night), used by the lit windows in BuildingMeshes.
 export const LOOK = { uSat: { value: 1.1 }, uGain: { value: 0.9 }, uDark: { value: 0 },
-                      uDetail: { value: null }, uDetailScale: { value: 500 / 2.5 }, uDetailNear: { value: 30 }, uDetailFar: { value: 260 }, uDetailStrength: { value: 0.9 } }
+                      uDetail: { value: null }, uDetailScale: { value: 500 / 2.5 }, uDetailNear: { value: 30 }, uDetailFar: { value: 260 }, uDetailStrength: { value: 0.9 },
+                      uGrass: { value: null }, uGrassN: { value: null }, uGrassOn: { value: 0 }, uGrassScale: { value: 500 / 1.6 } }
+
+// Up close the photo cannot carry grass: at half a metre per pixel a lawn is a green smear. Where the photo pixel is
+// green, the near field blends in a photo-scanned grass material (ambientCG Grass004, CC0): its albedo modulated by
+// the photo's own brightness so the field keeps its patches, and its normal map so blades catch the sun. Fades out
+// by 90 m, where the photo alone is sharp enough.
+let grassRequested = false
+function requestGrass() {
+  if (grassRequested || !pbrEnabled()) return
+  grassRequested = true
+  Promise.all([loadBitmap(versioned("/textures/grass/color.jpg")), loadBitmap(versioned("/textures/grass/normal.jpg"))]).then(([c, n]) => {
+    LOOK.uGrass.value = bitmapTexture(c, { srgb: true, repeat: 1 })
+    LOOK.uGrassN.value = bitmapTexture(n, { srgb: false, repeat: 1 })
+    LOOK.uGrassOn.value = 1
+  }).catch((e) => console.warn("grass material:", e.message))
+}
 
 // The ground up close: a 500 m tile carries a 1024 px photo (half a metre per pixel) on a 10 m height grid, so the
 // first thirty metres around the car were a blur of big soft pixels on flat facets. A tiling grain texture
@@ -94,23 +110,33 @@ export function terrainMaterial(tex, photo) {
   const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 1 })
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, { uSat: LOOK.uSat, uGain: LOOK.uGain, uDetail: LOOK.uDetail, uDetailScale: LOOK.uDetailScale,
-                                     uDetailNear: LOOK.uDetailNear, uDetailFar: LOOK.uDetailFar, uDetailStrength: LOOK.uDetailStrength })
-    detailTexture()
+                                     uDetailNear: LOOK.uDetailNear, uDetailFar: LOOK.uDetailFar, uDetailStrength: LOOK.uDetailStrength,
+                                     uGrass: LOOK.uGrass, uGrassN: LOOK.uGrassN, uGrassOn: LOOK.uGrassOn, uGrassScale: LOOK.uGrassScale })
+    detailTexture(); requestGrass()
     shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nvarying vec2 vDetailUv;\nuniform float uDetailScale;")
-      .replace("#include <uv_vertex>", "#include <uv_vertex>\n\tvDetailUv = uv * uDetailScale;")
+      .replace("#include <common>", "#include <common>\nvarying vec2 vDetailUv;\nvarying vec2 vGrassUv;\nuniform float uDetailScale, uGrassScale;")
+      .replace("#include <uv_vertex>", "#include <uv_vertex>\n\tvDetailUv = uv * uDetailScale;\n\tvGrassUv = uv * uGrassScale;")
     shader.fragmentShader = shader.fragmentShader
       .replace("uniform float opacity;", `uniform float opacity;
-uniform float uSat, uGain, uDetailNear, uDetailFar, uDetailStrength;
-uniform sampler2D uDetail;
-varying vec2 vDetailUv;`)
+uniform float uSat, uGain, uDetailNear, uDetailFar, uDetailStrength, uGrassOn;
+uniform sampler2D uDetail, uGrass, uGrassN;
+varying vec2 vDetailUv, vGrassUv;
+float grassW = 0.0;`)
       .replace("#include <map_fragment>", `#include <map_fragment>
 ${photo ? "\tfloat lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));\n\tdiffuseColor.rgb = mix(vec3(lum), diffuseColor.rgb, uSat) * uGain;" : ""}
 \tfloat detailW = (1.0 - smoothstep(uDetailNear, uDetailFar, length(vViewPosition))) * uDetailStrength;
 \tfloat det = texture2D(uDetail, vDetailUv).r;
 \tfloat det2 = texture2D(uDetail, vDetailUv * 3.7 + 0.31).r;                       // a finer octave against visible repeats
 \tfloat grain = mix(0.5, det * 0.7 + det2 * 0.3, detailW);
-\tdiffuseColor.rgb *= 0.72 + 0.56 * grain;`)
+\tdiffuseColor.rgb *= 0.72 + 0.56 * grain;
+\tif (uGrassOn > 0.5) {
+\t\tvec3 ph = diffuseColor.rgb;
+\t\tfloat green = clamp((ph.g - max(ph.r, ph.b)) * 10.0 + 0.2, 0.0, 1.0) * step(0.06, ph.g);   // how much this pixel is grass
+\t\tgrassW = green * (1.0 - smoothstep(35.0, 95.0, length(vViewPosition)));
+\t\tvec3 g = texture2D(uGrass, vGrassUv).rgb;
+\t\tfloat plum = dot(ph, vec3(0.3, 0.5, 0.2)) / 0.32;                                    // the photo's brightness keeps the patches
+\t\tdiffuseColor.rgb = mix(ph, g * clamp(plum, 0.55, 1.5) * vec3(0.92, 1.0, 0.85), grassW);
+\t}`)
       .replace("#include <normal_fragment_begin>", `#include <normal_fragment_begin>
 \t{
 \t\tvec2 e = vec2(1.0 / 256.0, 0.0);                                                // the detail's gradient bends the normal: grass and gravel catch the light
@@ -118,6 +144,10 @@ ${photo ? "\tfloat lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));\n\tdi
 \t\tfloat hz = texture2D(uDetail, vDetailUv + e.yx).r - texture2D(uDetail, vDetailUv - e.yx).r;
 \t\tvec3 bend = mat3(viewMatrix) * vec3(-hx, 0.0, -hz) * (2.2 * detailW);
 \t\tnormal = normalize(normal + bend);
+\t\tif (grassW > 0.0) {                                                                    // the grass normal map, world x/z as the tangent frame
+\t\t\tvec3 gn = texture2D(uGrassN, vGrassUv).xyz * 2.0 - 1.0;
+\t\t\tnormal = normalize(normal + mat3(viewMatrix) * vec3(gn.x, 0.0, -gn.y) * (0.9 * grassW));
+\t\t}
 \t}`)
   }
   m.customProgramCacheKey = () => photo ? "terrain-photo" : tex ? "terrain-paint" : "terrain-plain"

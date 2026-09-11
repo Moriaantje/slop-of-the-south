@@ -2,6 +2,7 @@ import * as THREE from "three"
 import { TUNING as T } from "game/Tuning"
 import { LOOK } from "game/TerrainTile"
 import { tuneWindows } from "game/BuildingMeshes"
+import { Sky } from "three/addons/objects/Sky.js"
 
 // A full day every 8 minutes, on the wall clock so every player shares the same time of day: the daylight hours
 // (03:45–22:15) take seven of them, the night (22:15–03:45) one, so a night is a short dark minute. Sunrise at 04:30,
@@ -43,12 +44,21 @@ export class DayNight {
     // the sky: a dome around the camera shaded from horizon to zenith, with the dusk glow and the stars
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(SKY_DISTANCE * 1.1, 32, 16), new THREE.ShaderMaterial({
       uniforms: { zenith: { value: new THREE.Color() }, horizon: { value: new THREE.Color() }, glow: { value: DUSK_GLOW.clone() },
-                  sunDir: { value: new THREE.Vector3(1, 0, 0) }, glowStrength: { value: 0 }, stars: { value: 0 }, groundDim: { value: 1 } },
+                  sunDir: { value: new THREE.Vector3(1, 0, 0) }, glowStrength: { value: 0 }, stars: { value: 0 }, groundDim: { value: 1 }, opacity: { value: 1 } },
       vertexShader: SKY_VERTEX, fragmentShader: SKY_FRAGMENT, side: THREE.BackSide, depthWrite: false, fog: false
     }))
     this.sky.renderOrder = -10
     this.sky.frustumCulled = false
+    this.sky.material.transparent = true                       // fades in over the scattering sky as night falls
     world.scene.add(this.sky)
+    // the daytime sky: three's Sky (Preetham analytic scattering): a real horizon haze and sun halo
+    this.scatter = new Sky()
+    this.scatter.scale.setScalar(SKY_DISTANCE * 1.05)
+    this.scatter.renderOrder = -11
+    this.scatter.frustumCulled = false
+    const su = this.scatter.material.uniforms
+    su.turbidity.value = 5; su.rayleigh.value = 1.6; su.mieCoefficient.value = 0.004; su.mieDirectionalG.value = 0.8
+    world.scene.add(this.scatter)
   }
 
   // game hours 0..24
@@ -96,7 +106,11 @@ export class DayNight {
     this._dir.set(Math.cos(a), 0, Math.sin(a) * 0.5 + 0.13).normalize().multiplyScalar(Math.cos(sunAlt)).setY(Math.sin(sunAlt))
     this.sunSprite.position.copy(cam).addScaledVector(this._dir, SKY_DISTANCE)
     u.sunDir.value.copy(this._dir)
+    u.opacity.value = 1 - smoothstep(0.02, 0.35, elev)          // the painted dome (dusk glow, stars) only once the sun is low
     this.sky.position.copy(cam)
+    this.scatter.position.copy(cam)
+    this.scatter.material.uniforms.sunPosition.value.copy(this._dir)
+    this.scatter.visible = u.opacity.value < 0.999
     this.sunSprite.material.opacity = smoothstep(-0.03, 0.06, elev)
     this.sunSprite.material.color.copy(this._c.copy(SUN_DAY).lerp(SUN_LOW, dusk))
     // moon: opposite the sun, up all night, gone by day
@@ -139,7 +153,7 @@ const SKY_VERTEX = /* glsl */`
   }`
 const SKY_FRAGMENT = /* glsl */`
   uniform vec3 zenith, horizon, glow, sunDir;
-  uniform float glowStrength, stars, groundDim;
+  uniform float glowStrength, stars, groundDim, opacity;
   varying vec3 vDir;
   float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
   void main() {
@@ -161,7 +175,7 @@ const SKY_FRAGMENT = /* glsl */`
       float star = step(0.9985, r) * dot_ * (0.45 + 0.55 * hash(cell + 1.0)) * smoothstep(0.02, 0.22, d.y);
       col += mix(vec3(1.0), vec3(0.8, 0.9, 1.0), hash(cell + 9.0)) * star * stars * 1.5;
     }
-    gl_FragColor = vec4(col, 1.0);
+    gl_FragColor = vec4(col, opacity);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }`

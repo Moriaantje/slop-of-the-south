@@ -10,7 +10,8 @@ export const GRASS_UNIFORMS = { uTime: { value: 0 } }
 
 const geometry = (() => {
   const pos = [], uv = [], idx = []
-  for (const [ax, az] of [[1, 0], [0, 1]]) {
+  for (const a of [0, Math.PI / 3, 2 * Math.PI / 3]) {                     // three quads in a star
+    const ax = Math.cos(a), az = Math.sin(a)
     const b = pos.length / 3
     for (const [sx, y] of [[-0.5, 0], [0.5, 0], [0.5, 1], [-0.5, 1]]) { pos.push(sx * ax, y, sx * az); uv.push(sx + 0.5, y) }
     idx.push(b, b + 1, b + 2, b, b + 2, b + 3)
@@ -28,7 +29,7 @@ const materials = []
 function material(kind) {
   if (materials[kind]) return materials[kind]
   const map = new THREE.CanvasTexture(paintTuft(kind)); map.colorSpace = THREE.SRGBColorSpace
-  const m = new THREE.MeshStandardMaterial({ map, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.95, metalness: 0 })
+  const m = new THREE.MeshStandardMaterial({ map, alphaTest: 0.3, alphaToCoverage: true, side: THREE.DoubleSide, roughness: 0.95, metalness: 0 })
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = GRASS_UNIFORMS.uTime
     shader.vertexShader = shader.vertexShader
@@ -123,7 +124,7 @@ export class Grass {
         const x = pts[i * 4], y = pts[i * 4 + 1], z = pts[i * 4 + 2], lush = pts[i * 4 + 3]
         q.setFromAxisAngle(up, hash(x * 0.37 + z * 0.91) * Math.PI)
         const h = (kind === 2 ? 0.9 : 0.55) * (0.8 + 0.4 * hash(x + z))
-        mesh.setMatrixAt(i, m.compose(p.set(x, y - 0.02, z), q, s.set(h * 1.6, h, h * 1.6)))
+        mesh.setMatrixAt(i, m.compose(p.set(x, y - 0.02, z), q, s.set(h * 2.4, h, h * 2.4)))
         mesh.setColorAt(i, c.setRGB(0.85 + 0.2 * hash(z - x), 0.85 + 0.3 * lush * hash(x * 1.3), 0.8))
       }
       mesh.instanceMatrix.needsUpdate = true; mesh.instanceColor.needsUpdate = true
@@ -192,8 +193,8 @@ function paintTuft(kind) {
   const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296 }
   const greens = kind === 2 ? ["#6f9a3a", "#86ad44", "#9dbd52", "#b3c95e"] : ["#4f8a34", "#5f9b3c", "#72ad46", "#88bb50", "#a3c85c"]
   ctx.lineCap = "round"
-  for (let i = 0; i < 26; i++) {
-    const x0 = W * (0.25 + rnd() * 0.5), lean = (rnd() - 0.5) * W * 0.5, h = H * (kind === 2 ? 0.55 + rnd() * 0.45 : 0.4 + rnd() * 0.4)
+  for (let i = 0; i < 70; i++) {
+    const x0 = W * (0.08 + rnd() * 0.84), lean = (rnd() - 0.5) * W * 0.45, h = H * (kind === 2 ? 0.55 + rnd() * 0.45 : 0.35 + rnd() * 0.45)
     ctx.strokeStyle = greens[Math.floor(rnd() * greens.length)]
     ctx.lineWidth = 2 + rnd() * 3
     ctx.beginPath(); ctx.moveTo(x0, H); ctx.quadraticCurveTo(x0 + lean * 0.3, H - h * 0.6, x0 + lean, H - h); ctx.stroke()

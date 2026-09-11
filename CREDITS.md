@@ -19,7 +19,7 @@ Slop of the South is built from open data and open assets. Keep these credits wi
 
 - **ambientCG** (ambientcg.com) — photo-scanned PBR materials, CC0, under `public/textures/<name>/`:
   asphalt = Asphalt012, klinker = PavingStones085, pavers = PavingStones070, gravel = Gravel022, concrete = Concrete034,
-  brick = Bricks059, brick2 = Bricks090, plaster = Plaster001, rooftile = RoofingTiles005 (1K JPG sets; colour + GL
+  brick = Bricks059, brick2 = Bricks090, plaster = Plaster001, rooftile = RoofingTiles005, grass = Grass004 (1K JPG sets; colour + GL
   normal at 1024 px, roughness downscaled to 512 px). Refresh with `bin/rails assets:textures`.
 - **Quaternius** (quaternius.com) — rigged and animated glTF models, CC0 1.0, under `public/models/` (converted losslessly
   from the packs' embedded-buffer `.gltf` to `.glb`):
