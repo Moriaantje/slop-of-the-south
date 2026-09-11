@@ -34,6 +34,7 @@
 <div id="burn"></div>
 <canvas id="minimap" class="minimap"></canvas>
 <div id="help">W A S D of pijltjes · spatie + sturen = driften (loslaten = turbo) · shift = boost · E wapen · V voertuig · R terug op de weg · M kaart (klik op een ontdekte plaats = teleport)</div>
+<div id="credits">Luchtfoto © Beeldmateriaal Nederland (CC BY 4.0) via PDOK · kaartdata © OpenStreetMap, 3D BAG, BGT, AHN, NDW · texturen ambientCG (CC0) · modellen Quaternius (CC0)</div>
 
 <%# the loading screen (LoadingScreen.js): the place's pictures, name and story while the tiles stream in %>
 <div id="laden" hidden>
@@ -96,6 +97,7 @@
   #drift { font-size: 14px; font-weight: 700; letter-spacing: .12em; color: #0f3f8f; margin-bottom: 6px; }
   #drift.l3 { color: #b8002f; }
   #help { position: fixed; left: 28px; bottom: 24px; font-size: 13px; color: #1d2b1f; opacity: .65; }
+  #credits { position: fixed; left: 28px; bottom: 8px; font-size: 11px; color: #1d2b1f; opacity: .45; }
   #burn { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, rgba(255, 120, 0, .25), rgba(180, 20, 0, .85)); opacity: 0; transition: opacity .5s; }
   #burn.on { opacity: 1; transition: opacity .05s; }
   .minimap { position: fixed; left: 28px; bottom: 52px; width: 230px; height: 230px; border: 3px solid #fff; border-radius: 10px;

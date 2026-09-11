@@ -8,6 +8,7 @@ import { buildLamps, buildSignals } from "game/Furniture"
 import { buildSigns } from "game/Signs"
 import { paintCover, buildWater } from "game/Cover"
 import { ROAD_LIFT } from "game/Roads"
+import { Ortho } from "game/Ortho"
 
 // Streams 500 m tiles in a square around the player and disposes the ones left behind. Tile JSON is fetched in the
 // background; building the meshes is synchronous and heavy (a dense town tile is ~1 MB with 60k building vertices), so
@@ -22,6 +23,7 @@ export class ChunkManager {
     this.radius = radius
     this.tiles = new Map()     // key "tx_ty" → { key, group, terrain, roads, roadIndex, junctions, biome, objects } or { loading: true }
     this.queue = []            // fetched tile data waiting to be built
+    this.ortho = new Ortho(config)   // aerial photos for the terrain, streamed in the background
   }
 
   // game coords → tile indices (RD metres / tile size)
@@ -41,6 +43,7 @@ export class ChunkManager {
       }
     for (const [key, t] of this.tiles)
       if (!wanted.has(key) && !t.loading) { this.dispose(t); this.tiles.delete(key) }
+    this.ortho.update(cx, cy)
     // build one queued tile per frame, the one under the player first
     if (this.queue.length) {
       const here = `${cx}_${cy}`
@@ -113,6 +116,7 @@ export class ChunkManager {
     try {
       const objects = new Map(), reg = (key, handle) => objects.set(key, handle)
       const terrain = new TerrainTile(data, this.cfg, data.cover?.length ? paintCover(data.cover) : null)
+      this.ortho.request({ key, tx, ty, terrain })
       const group = new THREE.Group()
       group.add(terrain.mesh)
       const water = buildWater(data.cover ?? [], (x, z) => terrain.heightAt(x, z), data.origin)
@@ -142,6 +146,7 @@ export class ChunkManager {
 
   dispose(t) {
     this.hooks.onDrop?.(t)
+    this.ortho.cancel(t.key)
     this.scene.remove(t.group)
     t.group.traverse((o) => {
       o.userData.onDispose?.()                                             // e.g. traffic lights leave the animation set

@@ -68,6 +68,12 @@ export const TUNING = {
     radius: 2.2, respawn: 20, height: 0.5, size: 2.4,
   },
   fx: { smokeRate: 28, smokeLife: 0.7, smokeSlip: 0.18, smokePool: 64, flameFlicker: 0.4 },
+  look: {
+    exposure: 1.0,         // tone mapping exposure by day (the night adds up to +35 %)
+    envIntensity: 0.35,    // how much the sky environment map lights standard materials
+    hemi: 0.65,            // hemisphere light scale once the environment map supplies ambient (1 without it)
+    orthoSat: 1.1, orthoGain: 0.9,   // saturation and gain of the aerial photo on the terrain
+  },
 }
 
 // exponential approach: frame-rate independent first-order smoothing

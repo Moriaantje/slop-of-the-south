@@ -19,6 +19,10 @@ module Api
         # changes whenever tiles:build rewrites public/tiles, so browsers drop their cached tile files (the static
         # file server sends a two-day max-age)
         tiles_version: (dir = Rails.root.join("public", "tiles")).exist? ? File.mtime(dir).to_i : 0,
+        # the newest file under public/textures and public/models: the client appends it to their URLs
+        assets_version: Dir[Rails.root.join("public", "{textures,models}", "**", "*").to_s].map { File.mtime(_1).to_i }.max || 0,
+        # aerial photos: a prefetched copy under public/ortho (ortho:fetch) is tried first, PDOK live unless ORTHO_LIVE=0
+        ortho: { local: (od = Rails.root.join("public", "ortho")).exist?, live: ENV["ORTHO_LIVE"] != "0", version: od.exist? ? File.mtime(od).to_i : 0 },
         # server clock in milliseconds; the client offsets Date.now() by it so every player sees the same world
         now: Game.now_ms
       }

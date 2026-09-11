@@ -1,4 +1,6 @@
 import * as THREE from "three"
+import { TUNING as T } from "game/Tuning"
+import { LOOK } from "game/TerrainTile"
 
 // A full day every 6 minutes, on the wall clock so every player shares the same time of day. Sunrise at 04:30,
 // solar noon at 13:00, sunset at 21:30 game time. The sun light swings east → south → west and fades out; the sky,
@@ -37,7 +39,7 @@ export class DayNight {
     // the sky: a dome around the camera shaded from horizon to zenith, with the dusk glow and the stars
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(SKY_DISTANCE * 1.1, 32, 16), new THREE.ShaderMaterial({
       uniforms: { zenith: { value: new THREE.Color() }, horizon: { value: new THREE.Color() }, glow: { value: DUSK_GLOW.clone() },
-                  sunDir: { value: new THREE.Vector3(1, 0, 0) }, glowStrength: { value: 0 }, stars: { value: 0 } },
+                  sunDir: { value: new THREE.Vector3(1, 0, 0) }, glowStrength: { value: 0 }, stars: { value: 0 }, groundDim: { value: 1 } },
       vertexShader: SKY_VERTEX, fragmentShader: SKY_FRAGMENT, side: THREE.BackSide, depthWrite: false, fog: false
     }))
     this.sky.renderOrder = -10
@@ -99,8 +101,9 @@ export class DayNight {
     w.sun.intensity = 1.6 * daylight + 0.12 * (1 - daylight)
     w.hemi.color.copy(this._c.copy(NIGHT_HEMI).lerp(DAY_HEMI, daylight))
     w.hemi.groundColor.copy(this._c.copy(NIGHT_GROUND).lerp(DAY_GROUND, daylight))
-    w.hemi.intensity = 0.22 + 0.68 * daylight
-    w.renderer.toneMappingExposure = 1 + 0.35 * (1 - daylight)
+    w.hemi.intensity = (0.22 + 0.68 * daylight) * T.look.hemi
+    w.renderer.toneMappingExposure = T.look.exposure * (1 + 0.35 * (1 - daylight))
+    LOOK.uSat.value = T.look.orthoSat; LOOK.uGain.value = T.look.orthoGain
 
     this.darkness = 1 - daylight
     this.env.darkness = this.darkness
@@ -119,7 +122,7 @@ const SKY_VERTEX = /* glsl */`
   }`
 const SKY_FRAGMENT = /* glsl */`
   uniform vec3 zenith, horizon, glow, sunDir;
-  uniform float glowStrength, stars;
+  uniform float glowStrength, stars, groundDim;
   varying vec3 vDir;
   float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
   void main() {
@@ -130,7 +133,7 @@ const SKY_FRAGMENT = /* glsl */`
     float toSun = max(dot(normalize(vec3(d.x, 0.0, d.z)), normalize(vec3(sunDir.x, 0.0, sunDir.z))), 0.0);
     col += glow * glowStrength * exp(-h * 7.0) * (0.15 + 0.85 * pow(toSun, 4.0));
     col += glow * glowStrength * 0.35 * exp(-h * 2.5) * pow(toSun, 12.0);
-    if (d.y < 0.0) col = horizon;
+    if (d.y < 0.0) col = horizon * groundDim;          // below the horizon (only the environment map looks there)
     // stars: a sparse hash on the direction; each lit cell holds one soft dot, fading out towards the horizon.
     // The dome covers every pixel, so skip the six hashes per fragment while there are no stars to show.
     if (stars > 0.001 && d.y > 0.0) {

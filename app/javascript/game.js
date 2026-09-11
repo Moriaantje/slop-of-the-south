@@ -22,11 +22,15 @@ import { Effects } from "game/Effects"
 import { VehicleFx } from "game/VehicleFx"
 import { Pickups } from "game/Pickups"
 import { TUNING } from "game/Tuning"
+import { configure as configureTextures } from "game/Textures"
+import { SkyEnv } from "game/EnvMap"
+import { Blob } from "game/Shadows"
 
 async function main() {
   const config = await (await fetch("/api/world")).json()
   const homeSpawn = { ...config.spawn }      // the world spawn, kept as the fallback when a URL spawn is outside the border
   const hubs = config.hubs ?? []
+  configureTextures({ version: config.assets_version })
   // ?spawn=x,z[,yaw] teleports to game coordinates (handy for exploring the countryside)
   let urlSpawn = false
   const spawnParam = new URLSearchParams(location.search).get("spawn")
@@ -49,8 +53,10 @@ async function main() {
   const car     = new Vehicle(config.spawn, vehicleSpec(localStorage.getItem("voertuig") ?? "trike"))
   let carFx     = new VehicleFx(car.mesh, effects.smoke)
   const combat  = new Combat({ scene: world.scene, index, effects, heightAt: (x, z) => chunks.heightAt(x, z), car, send: (action, data) => net.send(action, data) })
-  const remotes = new RemoteCars(world.scene, effects.smoke)
+  const remotes = new RemoteCars(world.scene, effects.smoke, { heightAt: (x, z) => chunks.heightAt(x, z) })
   const dayNight = new DayNight(world)
+  const skyEnv  = new SkyEnv(world, dayNight)               // the sky baked into an environment map for the materials
+  const shadow  = new Blob(world.scene)                      // the contact shadow under the player's car
   const loading = new LoadingScreen(el("laden"))
   const burnEl = el("burn")
   const burn = (ms) => { burnEl.classList.add("on"); setTimeout(() => burnEl.classList.remove("on"), ms) }
@@ -92,7 +98,7 @@ async function main() {
     },
     onHeal: () => { chunks.reload(); index.resetState(); combat.reset() },
   })
-  window.slop = { world, dayNight, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
+  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
@@ -140,6 +146,7 @@ async function main() {
     chunks.update(car.x, car.z)
     updateSignals()
     const darkness = dayNight.update()
+    skyEnv.update(now)
     car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)
     updateWater(dayNight.env, timer.getElapsed())
     if (input.toggleMap) minimap.toggle()
@@ -184,6 +191,7 @@ async function main() {
       }
     }
     world.followCamera(car, dt)
+    if (placed) shadow.place(car.x, car.y, car.z, car.yaw, car.mesh.position.y - car.y, darkness)   // car.y is the driving surface; the mesh floats above it in the air
     effects.update(dt, world.camera)
     remotes.update(car, world.camera)
     if (loading.open && placed && chunks.readyFraction(car.x, car.z) >= 1) loading.hide()

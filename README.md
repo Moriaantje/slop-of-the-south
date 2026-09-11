@@ -53,10 +53,11 @@ Game space is RD minus a fixed origin so floats stay small:
 | Traffic signs | **NDW** Verkeersborden (Nationaal Dataportaal Wegverkeer, `traffic-signs/v4/current-state`) | The API answers with the whole country as one 1.2 GB GeoJSON (its filters are ignored), so `rake ndw:fetch` downloads it once and `rake ndw:import` streams it through `jq --stream` into `traffic_signs` for the world bbox (227k signs in Limburg). Every sign face is painted from its RVV code and value on a canvas (`game/Signs.js`: A1 speed discs, B6 yield, G11 cycle path, E4 parking, H1 town entry, J warnings, onderborden with their text …) and faces against the traffic it applies to (`bearing` + 180°). Signs at one spot share a pole. |
 | Lamp posts | **BGT** `Paal` with `plus-type = lichtmast` (bulk extracts, `BGT_BULK_TYPES=paal rake bgt:bulk_fetch bgt:paal_import`) | 101k masts in Limburg, arm turned towards the nearest road, 9 m on main roads, 6 m elsewhere. `Paal` is an optional IMGeo object: the Parkstad municipalities (Heerlen, Kerkrade, Landgraaf, Brunssum …) deliver none; there OSM `highway=street_lamp` (`rake osm:pbf_points`) is the sparse fallback. |
 | Traffic lights | **BGT** `Paal` with `plus-type = verkeersregelinstallatiepaal` (990 poles) + OSM `highway=traffic_signals` nodes (2.4k) | Each BGT pole becomes a signal head facing the traffic that approaches it (side of the road decides the direction); where BGT has no poles the OSM node gets one pole per approaching road. Heads run a shared 40 s cycle on the wall clock, phased by axis, so all players see the same colours. Live iVRI state via Talking Traffic is a later stretch goal. |
+| Aerial photographs | **Luchtfoto Actueel Ortho 25 cm RGB** (Beeldmateriaal Nederland) via the PDOK WMS, CC BY 4.0 | The browser fetches one GetMap per 500 m tile (bbox = the tile's RD envelope, 1024 px around the player, 512 px beyond, ≤4 in flight) and drapes it over the terrain in place of the painted BGT texture (`game/Ortho.js`; `?ortho=0` for the paint). `rake ortho:fetch` prefetches the built tiles into `public/ortho` (gitignored) so a LAN can play offline. Credit "Luchtfoto © Beeldmateriaal Nederland, via PDOK" — see CREDITS.md. |
 
 
-Everything above is open data. Keep attribution ("© OpenStreetMap contributors", "AHN", "3D BAG", "BGT", "NDW")
-in the game's about screen.
+Everything above is open data. Keep attribution ("© OpenStreetMap contributors", "AHN", "3D BAG", "BGT", "NDW",
+"Luchtfoto © Beeldmateriaal Nederland, via PDOK") in the game — the credits line under the help text and CREDITS.md.
 
 ### 1.4 Pipeline
 

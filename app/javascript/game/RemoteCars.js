@@ -1,6 +1,7 @@
 import * as THREE from "three"
 import { makeVehicleMesh } from "game/Vehicles"
 import { makeBeacon, placeBeacon, disposeBeacon } from "game/Beacon"
+import { Blob } from "game/Shadows"
 import { VehicleFx } from "game/VehicleFx"
 import { TUNING as T, lerpAngle, wrapAngle } from "game/Tuning"
 
@@ -12,9 +13,10 @@ const TIMEOUT_MS = 6000
 // the drift/boost flags in the move messages light their tyre smoke and exhaust flames. The mesh follows the vehicle
 // named in the move messages and is swapped when the player picks another.
 export class RemoteCars {
-  constructor(scene, smokePool = null) {
+  constructor(scene, smokePool = null, { heightAt = null } = {}) {
     this.scene = scene
     this.pool = smokePool
+    this.heightAt = heightAt     // ground under a remote car, for its contact shadow
     this.cars = new Map()    // id → { mesh, color, buf: [{t, x, y, z, yaw, speed}], lastSeen, brake, drift, boost, name, beacon, fx, wheelAngle }
     this.darkness = 0
     this.lastT = performance.now()
@@ -40,7 +42,7 @@ export class RemoteCars {
     const vehicle = msg.vehicle || "auto"
     if (!car) {
       const color = colorFor(msg.id)
-      car = { mesh: null, vehicle: null, color, buf: [], lastSeen: 0, brake: false, drift: false, boost: false, name: "", beacon: makeBeacon(this.scene, color), fx: null, wheelAngle: 0 }
+      car = { mesh: null, vehicle: null, color, buf: [], lastSeen: 0, brake: false, drift: false, boost: false, name: "", beacon: makeBeacon(this.scene, color), fx: null, wheelAngle: 0, shadow: new Blob(this.scene) }
       this.cars.set(msg.id, car)
     }
     if (car.vehicle !== vehicle) {
@@ -83,6 +85,7 @@ export class RemoteCars {
       const f = { x: -Math.sin(yaw), z: -Math.cos(yaw) }
       car.fx.update({ smoking: car.drift, boostPower: car.boost ? 1 : 0, vx: f.x * speed, vz: f.z * speed }, dt)
       if (local && camera) placeBeacon(car.beacon, x, y, z, car.name, local, camera)
+      if (car.shadow) { const g = this.heightAt ? this.heightAt(x, z) : y; car.shadow.place(x, g, z, yaw, y - g, this.darkness) }
     }
   }
 
@@ -93,6 +96,7 @@ export class RemoteCars {
     if (!car) return
     this.scene.remove(car.mesh)
     disposeBeacon(car.beacon)
+    car.shadow?.dispose()
     this.cars.delete(id)
   }
 }

@@ -1,9 +1,16 @@
 import * as THREE from "three"
+import { disposeTexture } from "game/Textures"
 
 const plain = new THREE.MeshStandardMaterial({ color: 0x7fa15a, roughness: 1 })   // tiles without land cover
 plain.__shared = true
 
-// Heightmap (rows north→south, columns west→east) → displaced plane, plus bilinear sampling.
+// Saturation and gain applied to the aerial photo: it carries baked sunlight already, so under the scene's own sun
+// and tone mapping it washes out; a little less gain and a little more colour bring it next to the painted palette.
+// Shared uniform objects, tweakable live through TUNING.look (DayNight copies them every frame).
+export const LOOK = { uSat: { value: 1.1 }, uGain: { value: 0.9 } }
+
+// Heightmap (rows north→south, columns west→east) → displaced plane, plus bilinear sampling. The material starts with
+// the painted land cover (or the shared green) and swaps to the aerial photo when Ortho delivers it.
 export class TerrainTile {
   constructor(data, cfg, texture = null) {
     this.ox = data.origin[0]            // west edge (game x)
@@ -20,9 +27,16 @@ export class TerrainTile {
     geo.computeVertexNormals()
 
     // per-tile material when a land cover texture is painted (disposed with the tile), else the shared green
-    const material = texture ? new THREE.MeshStandardMaterial({ map: texture, roughness: 1 }) : plain
+    const material = texture ? terrainMaterial(texture, false) : plain
     this.mesh = new THREE.Mesh(geo, material)
     this.mesh.position.set(this.ox + this.size / 2, 0, this.oz + this.size / 2)
+  }
+
+  // the aerial photo arrived: replace the paint (or the shared green) with it
+  setMap(tex) {
+    const old = this.mesh.material
+    this.mesh.material = terrainMaterial(tex, true)
+    if (old !== plain) { disposeTexture(old.map); old.dispose() }
   }
 
   heightAt(x, z) {
@@ -34,4 +48,20 @@ export class TerrainTile {
     const bot = h[(r + 1) * n + c] * (1 - fu) + h[(r + 1) * n + c + 1] * fu
     return top * (1 - fv) + bot * fv
   }
+}
+
+// photo: true adds the saturation/gain tweak; every photo tile shares one shader program through the cache key
+export function terrainMaterial(tex, photo) {
+  const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 1 })
+  if (photo) {
+    m.onBeforeCompile = (shader) => {
+      shader.uniforms.uSat = LOOK.uSat
+      shader.uniforms.uGain = LOOK.uGain
+      shader.fragmentShader = shader.fragmentShader
+        .replace("uniform float opacity;", "uniform float opacity;\nuniform float uSat;\nuniform float uGain;")
+        .replace("#include <map_fragment>", "#include <map_fragment>\n\tfloat lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));\n\tdiffuseColor.rgb = mix(vec3(lum), diffuseColor.rgb, uSat) * uGain;")
+    }
+    m.customProgramCacheKey = () => "terrain-photo"
+  }
+  return m
 }
