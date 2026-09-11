@@ -12,6 +12,8 @@ material.__shared = true
 const WALLS = [0xd9c4a5, 0xcdb597, 0xb99c7a, 0xa8836a, 0xe3d6c3, 0xc9c1b4, 0x9c7b66, 0xdccbb6]  // brick, plaster, dark brick
 const PITCHED = [0x6e3d33, 0x5a3a35, 0x4b4548, 0x7a4a3c, 0x3f3b3d, 0x8a5646]                   // tiles: terracotta to anthracite
 const FLAT = [0x6f6c68, 0x7d7a74, 0x5e5c59]                                                      // bitumen / gravel
+const POOL3 = [], POOL2 = []                                                                      // scratch vectors reused per face
+const X_AXIS = new THREE.Vector3(1, 0, 0)
 
 export function buildBuildingMeshes(meshes, reg) {
   if (!meshes?.length) return null
@@ -29,12 +31,14 @@ export function buildBuildingMeshes(meshes, reg) {
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, top = -Infinity
     for (const face of b.f) {
       const label = face[0]
-      // rings → arrays of Vector3 (outer first, then holes)
+      // rings → arrays of Vector3 (outer first, then holes); the vectors come from a pool reused per face, since a
+      // dense tile has 60k ring vertices and allocating them all made every tile load a visible hitch
       const rings = []
+      let used = 0
       for (let r = 1; r < face.length; r++) {
         const flat = face[r], ring = []
         for (let i = 0; i + 2 < flat.length; i += 3) {
-          const p = new THREE.Vector3(ox + flat[i] / 100, oy + flat[i + 1] / 100, oz + flat[i + 2] / 100)
+          const p = (POOL3[used] ??= new THREE.Vector3()).set(ox + flat[i] / 100, oy + flat[i + 1] / 100, oz + flat[i + 2] / 100); used++
           ring.push(p)
           if (reg) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); top = Math.max(top, p.y); if (!b.fp) xz.push(p.x, p.z) }
         }
@@ -45,13 +49,14 @@ export function buildBuildingMeshes(meshes, reg) {
       if (normal.lengthSq() < 1e-12) continue
       normal.normalize()
       // 2D basis in the face plane for earcut
-      u.copy(Math.abs(normal.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : up).cross(normal).normalize()
+      u.copy(Math.abs(normal.y) > 0.9 ? X_AXIS : up).cross(normal).normalize()
       v.crossVectors(normal, u)
       pts3.length = 0; pts2.length = 0
       const contour = [], holes = []
+      let used2 = 0
       for (let r = 0; r < rings.length; r++) {
         const target = r === 0 ? contour : []
-        for (const p of rings[r]) { pts3.push(p); target.push(new THREE.Vector2(p.dot(u), p.dot(v))) }
+        for (const p of rings[r]) { pts3.push(p); target.push((POOL2[used2] ??= new THREE.Vector2()).set(p.dot(u), p.dot(v))); used2++ }
         if (r > 0) holes.push(target)
       }
       let tris

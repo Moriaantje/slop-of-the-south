@@ -23,10 +23,15 @@ const poolMat = { 6: 0xffa54a, 9: 0xd8e4ff }                                   /
 for (const h of Object.keys(poolMat)) poolMat[h] = Object.assign(new THREE.MeshBasicMaterial({ map: poolTexture, color: poolMat[h], transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }), { __shared: true })
 const poolGeometry = new THREE.CircleGeometry(1, 24); poolGeometry.rotateX(-Math.PI / 2); poolGeometry.__shared = true
 
-// darkness 0 (day) … 1 (night): lamp heads light up and the ground pools appear
+// darkness 0 (day) … 1 (night): lamp heads light up and the ground pools appear. By day the pools (≈200 additive
+// discs per tile) are hidden outright: an opacity-0 transparent mesh is still sorted and blended.
+const poolMeshes = new Set()
+let poolsVisible = true
 export function setNightLevel(d) {
   lampHead.emissiveIntensity = 0.1 + 1.8 * d
   for (const m of Object.values(poolMat)) m.opacity = 0.95 * d * d
+  const visible = d > 0.02
+  if (visible !== poolsVisible) { poolsVisible = visible; for (const mesh of poolMeshes) mesh.visible = visible }
 }
 
 const lampGeometry = {}, lampHeadGeometry = {}
@@ -62,8 +67,11 @@ export function buildLamps(lamps, heightAt, reg) {
     poles.instanceMatrix.needsUpdate = heads.instanceMatrix.needsUpdate = pools.instanceMatrix.needsUpdate = true
     poles.geometry.__shared = heads.geometry.__shared = true
     pools.renderOrder = 2
+    pools.visible = poolsVisible
+    poolMeshes.add(pools)
     group.add(poles, heads, pools)
   }
+  group.userData.onDispose = () => { for (const o of group.children) poolMeshes.delete(o) }
   return group
 }
 

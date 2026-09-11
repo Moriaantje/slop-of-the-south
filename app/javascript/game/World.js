@@ -5,7 +5,7 @@ import { ChaseCamera } from "game/Camera"
 export class World {
   constructor(container) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5))   // 2× on a Retina screen quadruples the fill cost for little gain with MSAA on
     this.renderer.setSize(innerWidth, innerHeight)
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     container.appendChild(this.renderer.domElement)

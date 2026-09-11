@@ -6,7 +6,9 @@ import { pointKey, hideInstance } from "game/Destructibles"
 // its position, so the same tree always stands in the same place looking the same. Tiles draw one InstancedMesh
 // per variant. Tile entries: [x, z, kind, height] with kind 0 street/park tree, 1 broadleaf wood, 2 conifer. With
 // `reg` every tree registers a destructible handle keyed by its position; a felled tree is a zero-scale instance.
-const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, side: THREE.DoubleSide })
+// front faces only: leaf clusters and trunks are closed shapes, and the 8k trees around the player are the biggest
+// triangle budget in the scene, so drawing their back faces too would double it
+const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 })
 material.__shared = true
 
 const VARIANTS = { 0: 6, 1: 4, 2: 3, 3: 3 }
@@ -62,7 +64,8 @@ function buildVariant(kind, seed) {
   const leaf = new THREE.Color(LEAVES[kind][Math.floor(rnd() * LEAVES[kind].length)])
   if (kind === 2) conifer(out, rnd, bark, leaf)
   else if (kind === 3) branch(out, rnd, new THREE.Vector3(), new THREE.Vector3(0, 1, 0), 0.42, 0.05, 0, 2, 0.2, bark, leaf)   // short trunk, broad crown
-  else branch(out, rnd, new THREE.Vector3(), new THREE.Vector3(0, 1, 0), kind === 0 ? 0.36 : 0.3, 0.035, 0, kind === 0 ? 3 : 2, kind === 0 ? 0.11 : 0.17, bark, leaf)
+  // two levels of branching for every kind: three levels made a street tree ~750 triangles (≈6 M for the trees in view)
+  else branch(out, rnd, new THREE.Vector3(), new THREE.Vector3(0, 1, 0), kind === 0 ? 0.36 : 0.3, 0.035, 0, 2, kind === 0 ? 0.16 : 0.17, bark, leaf)
 
   let maxY = 0
   for (let i = 1; i < out.pos.length; i += 3) maxY = Math.max(maxY, out.pos[i])

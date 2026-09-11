@@ -6,6 +6,7 @@ const SMALL_SCALE = 3.5          // m/px in the corner map
 const DETAIL_SCALE = 4.5         // load 1 km detail cells when zoomed in beyond this (the corner map included)
 const MIN_SCALE = 0.4            // max zoom-in
 const REDRAW_MS = 80
+const LAYER_MARGIN = 1           // the cached map layer extends this many view widths beyond the view on each side
 
 const BASE = "#d7dec3"
 const COVER = {
@@ -18,6 +19,7 @@ const ROAD = {
   tertiary: ["#fbeeb5", 1.5], tertiary_link: ["#fbeeb5", 1.0], default: ["#ffffff", 1.2]
 }
 const BUILDING = "#b7a597", TREE = "#5f8c3e", WATER_EDGE = "#7fa9cc"
+const BBOX = new WeakMap()       // flat coordinate array → [minX, minZ, maxX, maxZ]
 
 export class Minimap {
   constructor(canvas, config, { onTeleport }) {
@@ -34,8 +36,13 @@ export class Minimap {
     this.lastDraw = 0
     this.drag = null
     this.hover = null
+    // The static map (cover, roads, buildings, trees, border) is rasterised once into an offscreen layer three
+    // view-widths wide and blitted with an offset while the car moves; it is redrawn only when the view leaves it,
+    // the zoom changes or new cells arrive. Re-pathing the whole province 12× a second was a large share of the frame.
+    this.layer = null
+    this.layerDirty = true
     fetch("/map/overview.json").then((r) => (r.ok ? r : fetch("/api/map/overview"))).then((r) => r.json())
-      .then((o) => { this.overview = o; this.dirty = true; if (this.expanded) this.fit() }).catch(console.warn)
+      .then((o) => { this.overview = o; this.dirty = this.layerDirty = true; if (this.expanded) this.fit() }).catch(console.warn)
 
     canvas.addEventListener("mousedown", (e) => { this.drag = { x: e.offsetX, y: e.offsetY, moved: false }; e.preventDefault() })
     canvas.addEventListener("mousemove", (e) => {
@@ -89,7 +96,8 @@ export class Minimap {
     this.w = Math.max(1, Math.round(r.width)); this.h = Math.max(1, Math.round(r.height))
     this.canvas.width = this.w * dpr; this.canvas.height = this.h * dpr
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    this.dirty = true
+    this.dpr = dpr
+    this.dirty = this.layerDirty = true
   }
 
   bounds() {
@@ -145,44 +153,93 @@ export class Minimap {
       if (this.cells.has(key)) continue
       this.cells.set(key, "loading")
       fetch(`/map/${key}.json`).then((r) => (r.ok ? r : fetch(`/api/map/${mx}/${my}`))).then((r) => (r.ok ? r.json() : null))
-        .then((data) => { this.cells.set(key, data ?? "missing"); this.dirty = true })
+        .then((data) => { this.cells.set(key, data ?? "missing"); this.dirty = this.layerDirty = true })
         .catch(() => this.cells.set(key, "missing"))
     }
   }
 
   draw() {
     const { ctx, w, h } = this
-    const s = this.view.scale
+    this.ensureLayer()
+    const L = this.layer
+    // blit the cached static map, offset by how far the view has moved since the layer was drawn
+    const ox = (L.cx - this.view.cx) / this.view.scale, oz = (L.cz - this.view.cz) / this.view.scale
     ctx.fillStyle = BASE
     ctx.fillRect(0, 0, w, h)
-    const detail = s < DETAIL_SCALE
-    const cells = detail ? this.cellsInView().map(([mx, my]) => this.cells.get(`${mx}_${my}`)).filter((c) => c && typeof c === "object") : []
-
-    if (this.overview) this.drawCover(this.overview.cover)
-    for (const c of cells) this.drawCover(c.cover)
-    if (this.overview && !detail) this.drawRoads(this.overview.roads, false)
-    for (const c of cells) this.drawRoads(c.roads, s < 2.5)
-    if (s < 4) for (const c of cells) this.drawBuildings(c.buildings)
-    if (s < 1.8) for (const c of cells) this.drawTrees(c.trees)
-    this.drawBorder()
+    ctx.drawImage(L.canvas, w / 2 + ox - L.w / 2, h / 2 + oz - L.h / 2, L.w, L.h)
     this.drawArena()
     if (this.expanded) this.drawLabels()
     this.drawCars()
     if (this.expanded) this.drawChrome()
   }
 
+  // redraw the static layer when the view has left it, the zoom or size changed, or new data arrived
+  ensureLayer() {
+    const s = this.view.scale, L = this.layer
+    const margin = this.expanded ? 0.25 : LAYER_MARGIN            // the expanded map is screen-sized: keep its layer small
+    const lw = this.w * (1 + 2 * margin), lh = this.h * (1 + 2 * margin)
+    const stale = !L || this.layerDirty || L.scale !== s || L.w !== lw || L.h !== lh ||
+      Math.abs(this.view.cx - L.cx) > margin * this.w * s * 0.8 || Math.abs(this.view.cz - L.cz) > margin * this.h * s * 0.8
+    if (!stale) return
+    this.layerDirty = false
+    const canvas = L?.canvas ?? document.createElement("canvas")
+    canvas.width = Math.round(lw * this.dpr); canvas.height = Math.round(lh * this.dpr)
+    const lctx = canvas.getContext("2d")
+    lctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
+    this.layer = { canvas, cx: this.view.cx, cz: this.view.cz, scale: s, w: lw, h: lh }
+    // draw with the layer as the current target: the path helpers read ctx/w/h/view
+    const saved = { ctx: this.ctx, w: this.w, h: this.h }
+    this.ctx = lctx; this.w = lw; this.h = lh
+    try {
+      lctx.fillStyle = BASE
+      lctx.fillRect(0, 0, lw, lh)
+      const detail = s < DETAIL_SCALE
+      const cells = detail ? this.cellsInView().map(([mx, my]) => this.cells.get(`${mx}_${my}`)).filter((c) => c && typeof c === "object") : []
+      if (this.overview) this.drawCover(this.overview.cover)
+      for (const c of cells) this.drawCover(c.cover)
+      if (this.overview && !detail) this.drawRoads(this.overview.roads, false)
+      for (const c of cells) this.drawRoads(c.roads, s < 2.5)
+      if (s < 4) for (const c of cells) this.drawBuildings(c.buildings)
+      if (s < 1.8) for (const c of cells) this.drawTrees(c.trees)
+      this.drawBorder()
+    } finally {
+      this.ctx = saved.ctx; this.w = saved.w; this.h = saved.h
+    }
+  }
+
+  // world-space bounding box of a flat [x, z, x, z, …] array (from `offset`), cached on the array
+  bbox(flat, offset = 0) {
+    let bb = BBOX.get(flat)
+    if (!bb) {
+      bb = [Infinity, Infinity, -Infinity, -Infinity]
+      for (let i = offset; i + 1 < flat.length; i += 2) {
+        const x = flat[i], z = flat[i + 1]
+        if (x < bb[0]) bb[0] = x; if (x > bb[2]) bb[2] = x; if (z < bb[1]) bb[1] = z; if (z > bb[3]) bb[3] = z
+      }
+      BBOX.set(flat, bb)
+    }
+    return bb
+  }
+
+  // whether the flat polyline/ring can touch the current target
+  visible(flat, offset = 0, slack = 0) {
+    const bb = this.bbox(flat, offset), s = this.view.scale
+    const hw = this.w / 2 * s + slack, hh = this.h / 2 * s + slack
+    return bb[2] >= this.view.cx - hw && bb[0] <= this.view.cx + hw && bb[3] >= this.view.cz - hh && bb[1] <= this.view.cz + hh
+  }
+
   path(flat, offset = 0) {
     const { ctx } = this
-    let [px, py] = this.toPixel(flat[offset], flat[offset + 1])
-    ctx.moveTo(px, py)
-    for (let i = offset + 2; i + 1 < flat.length; i += 2) { [px, py] = this.toPixel(flat[i], flat[i + 1]); ctx.lineTo(px, py) }
+    const s = 1 / this.view.scale, ox = this.w / 2 - this.view.cx * s, oz = this.h / 2 - this.view.cz * s
+    ctx.moveTo(ox + flat[offset] * s, oz + flat[offset + 1] * s)
+    for (let i = offset + 2; i + 1 < flat.length; i += 2) ctx.lineTo(ox + flat[i] * s, oz + flat[i + 1] * s)
   }
 
   drawCover(cover) {
     const { ctx } = this
     for (const entry of cover) {
       const color = COVER[entry[0]]
-      if (!color) continue
+      if (!color || !this.visible(entry[1])) continue
       ctx.fillStyle = color
       ctx.beginPath()
       for (let r = 1; r < entry.length; r++) { this.path(entry[r]); ctx.closePath() }
@@ -195,16 +252,17 @@ export class Minimap {
     const { ctx } = this
     ctx.lineCap = "round"; ctx.lineJoin = "round"
     const widthOf = (road) => { const [, min] = ROAD[road[0]] ?? ROAD.default; return Math.max(min, road[1] / this.view.scale) }
+    const shown = roads.filter((road) => this.visible(road, 3, 20))
     if (casing) {
       ctx.strokeStyle = "#9a9a9a"
-      for (const road of roads) { ctx.lineWidth = widthOf(road) + 1.6; ctx.beginPath(); this.path(road, 3); ctx.stroke() }
+      for (const road of shown) { ctx.lineWidth = widthOf(road) + 1.6; ctx.beginPath(); this.path(road, 3); ctx.stroke() }
     }
-    for (const road of roads) {
+    for (const road of shown) {
       ctx.strokeStyle = (ROAD[road[0]] ?? ROAD.default)[0]
       ctx.lineWidth = widthOf(road)
       ctx.beginPath(); this.path(road, 3); ctx.stroke()
     }
-    if (this.view.scale < 1.2) this.drawRoadNames(roads)
+    if (this.view.scale < 1.2) this.drawRoadNames(shown)
   }
 
   drawRoadNames(roads) {
@@ -230,7 +288,7 @@ export class Minimap {
     const { ctx } = this
     ctx.fillStyle = BUILDING
     ctx.beginPath()
-    for (const ring of buildings) { this.path(ring); ctx.closePath() }
+    for (const ring of buildings) { if (!this.visible(ring)) continue; this.path(ring); ctx.closePath() }
     ctx.fill()
   }
 

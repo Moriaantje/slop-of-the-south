@@ -131,13 +131,16 @@ const SKY_FRAGMENT = /* glsl */`
     col += glow * glowStrength * exp(-h * 7.0) * (0.15 + 0.85 * pow(toSun, 4.0));
     col += glow * glowStrength * 0.35 * exp(-h * 2.5) * pow(toSun, 12.0);
     if (d.y < 0.0) col = horizon;
-    // stars: a sparse hash on the direction; each lit cell holds one soft dot, fading out towards the horizon
-    vec3 cell = floor(d * 420.0);
-    float r = hash(cell);
-    vec3 f = fract(d * 420.0) - 0.5;
-    float dot_ = smoothstep(0.28, 0.05, length(f + (vec3(hash(cell + 3.0), hash(cell + 5.0), hash(cell + 7.0)) - 0.5) * 0.4));
-    float star = step(0.9985, r) * dot_ * (0.45 + 0.55 * hash(cell + 1.0)) * smoothstep(0.02, 0.22, d.y);
-    col += mix(vec3(1.0), vec3(0.8, 0.9, 1.0), hash(cell + 9.0)) * star * stars * 1.5;
+    // stars: a sparse hash on the direction; each lit cell holds one soft dot, fading out towards the horizon.
+    // The dome covers every pixel, so skip the six hashes per fragment while there are no stars to show.
+    if (stars > 0.001 && d.y > 0.0) {
+      vec3 cell = floor(d * 420.0);
+      float r = hash(cell);
+      vec3 f = fract(d * 420.0) - 0.5;
+      float dot_ = smoothstep(0.28, 0.05, length(f + (vec3(hash(cell + 3.0), hash(cell + 5.0), hash(cell + 7.0)) - 0.5) * 0.4));
+      float star = step(0.9985, r) * dot_ * (0.45 + 0.55 * hash(cell + 1.0)) * smoothstep(0.02, 0.22, d.y);
+      col += mix(vec3(1.0), vec3(0.8, 0.9, 1.0), hash(cell + 9.0)) * star * stars * 1.5;
+    }
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
