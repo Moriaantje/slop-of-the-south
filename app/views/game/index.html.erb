@@ -14,12 +14,12 @@
     <%# game time: a full day every 6 minutes (DayNight.js) %>
     <div id="clock"></div>
     <div id="players"></div>
-    <%# the round: town, parade progress, obstacles left (Round.js) %>
-    <div id="ronde" class="bord bord-plaats" hidden></div>
-    <%# the shared action: teleport or vehicle switch, one per minute %>
+    <%# you in the world: hit points, gold, level (Session.js) %>
+    <div id="status" hidden></div>
+    <%# the teleport cooldown, one jump per minute %>
     <div id="actie" hidden></div>
   </div>
-  <%# round start / result banner in the middle of the screen %>
+  <%# banner in the middle of the screen: death, quest events %>
   <div id="banner" class="bord" hidden><div id="banner-titel"></div><div id="banner-sub" class="bord-wijk"></div></div>
   <div id="flits" hidden></div>
   <%# the vehicle you drive and its trick (Vehicles.js); the bar fills while the trick recharges %>
@@ -33,9 +33,9 @@
 
 <div id="burn"></div>
 <canvas id="minimap" class="minimap"></canvas>
-<div id="help">W A S D of pijltjes · spatie + sturen = driften (loslaten = turbo) · shift = boost · E wapen · V voertuig · R terug op de weg · M kaart (klik = teleport) · N muziek</div>
+<div id="help">W A S D of pijltjes · spatie + sturen = driften (loslaten = turbo) · shift = boost · E wapen · V voertuig · R terug op de weg · M kaart (klik op een ontdekte plaats = teleport)</div>
 
-<%# the loading screen between rounds (LoadingScreen.js): the town's pictures, name and story while the tiles stream in %>
+<%# the loading screen (LoadingScreen.js): the place's pictures, name and story while the tiles stream in %>
 <div id="laden" hidden>
   <div class="laden-foto"></div><div class="laden-foto"></div>
   <div class="laden-tekst">
@@ -49,14 +49,12 @@
     <div class="laden-bron">Foto's en tekst: Wikipedia</div>
   </div>
 </div>
-<%# the vehicle picker (Picker.js): six cards, over the loading screen between towns or on V during a round %>
+<%# the vehicle picker (Picker.js): the cards, on V %>
 <div id="kiezer" hidden>
   <div class="kiezer-kop">Kies je voertuig</div>
   <div class="kaarten"></div>
   <div class="kiezer-hint"></div>
 </div>
-<%# the parade's music: a hidden YouTube player (Music.js) %>
-<div id="muziek"></div>
 
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb8cf;
@@ -75,8 +73,10 @@
   .bord-wijk { font-size: 12px; font-weight: 500; letter-spacing: .16em; opacity: .95; margin-bottom: 4px; }
   .bord-wijk:empty { display: none; }
   .bord-plaats { font-size: 16px; padding: 7px 16px 8px; }
-  #players, #biome, #clock, #actie { font-size: 14px; background: rgba(255, 255, 255, .6); padding: 3px 9px; border-radius: 4px; }
-  #actie { font-variant-numeric: tabular-nums; }
+  #players, #biome, #clock, #actie, #status { font-size: 14px; background: rgba(255, 255, 255, .6); padding: 3px 9px; border-radius: 4px; }
+  #actie, #status { font-variant-numeric: tabular-nums; }
+  #status { font-weight: 700; }
+  #status.laag { background: rgba(200, 32, 26, .75); color: #fff; }
   #banner { position: absolute; left: 50%; top: 16%; transform: translateX(-50%); font-size: 40px; padding: 16px 44px 18px; white-space: nowrap; }
   #banner .bord-wijk { font-size: 15px; margin: 6px 0 0; }
   #flits { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); background: rgba(18, 22, 30, .85); color: #fff;
@@ -119,8 +119,7 @@
   .laden-balk { height: 4px; background: rgba(255, 255, 255, .2); border-radius: 2px; overflow: hidden; }
   .laden-balk i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #e0241a, #f2c14e, #2a9d3a); transition: width .3s; }
   .laden-bron { font-size: 11px; opacity: .5; margin-top: 8px; }
-  #muziek { position: fixed; left: -300px; top: -300px; width: 1px; height: 1px; opacity: .01; pointer-events: none; }
-
+  
   #voertuig { position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%); font-size: 14px; background: rgba(255, 255, 255, .6);
               padding: 6px 14px 8px; border-radius: 6px; white-space: nowrap; }
   #voertuig-hint { opacity: .75; margin-left: 6px; }

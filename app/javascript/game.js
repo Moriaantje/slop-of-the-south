@@ -12,10 +12,8 @@ import { RemoteCars } from "game/RemoteCars"
 import { Locator, nearestPointOnRoads } from "game/Locator"
 import { Minimap } from "game/Minimap"
 import { FlameWall } from "game/FlameWall"
-import { Round } from "game/Round"
-import { Parade } from "game/Parade"
+import { Session, nearestHub } from "game/Session"
 import { LoadingScreen } from "game/LoadingScreen"
-import { Music } from "game/Music"
 import { vehicleSpec } from "game/Vehicles"
 import { Picker } from "game/Picker"
 import { Destructibles } from "game/Destructibles"
@@ -28,6 +26,7 @@ import { TUNING } from "game/Tuning"
 async function main() {
   const config = await (await fetch("/api/world")).json()
   const homeSpawn = { ...config.spawn }      // the world spawn, kept as the fallback when a URL spawn is outside the border
+  const hubs = config.hubs ?? []
   // ?spawn=x,z[,yaw] teleports to game coordinates (handy for exploring the countryside)
   let urlSpawn = false
   const spawnParam = new URLSearchParams(location.search).get("spawn")
@@ -52,13 +51,11 @@ async function main() {
   const combat  = new Combat({ scene: world.scene, index, effects, heightAt: (x, z) => chunks.heightAt(x, z), car, send: (action, data) => net.send(action, data) })
   const remotes = new RemoteCars(world.scene, effects.smoke)
   const dayNight = new DayNight(world)
-  const parade  = new Parade(world.scene)
   const loading = new LoadingScreen(el("laden"))
-  const music   = new Music(el("muziek"))
   const burnEl = el("burn")
   const burn = (ms) => { burnEl.classList.add("on"); setTimeout(() => burnEl.classList.remove("on"), ms) }
   let placed = false          // car and camera snapped onto the terrain once the spawn tile is in
-  let snapToRoad = urlSpawn   // after a map teleport or a ?spawn= URL: move onto the nearest street once its tile is in
+  let snapToRoad = urlSpawn   // after a teleport or a ?spawn= URL: move onto the nearest street once its tile is in
   const teleport = (x, z, yaw = car.yaw) => { car.reset({ x, z, yaw }); placed = false; snapToRoad = true; burn(400) }
   const voertuigEl = el("voertuig-naam"), hintEl = el("voertuig-hint")
   const applySpec = (spec) => {
@@ -69,49 +66,51 @@ async function main() {
     placed = false
   }
   voertuigEl.textContent = car.spec.naam; hintEl.textContent = car.spec.ability.hint
-  const ladenEl = el("laden")
-  // the picker: free at the first join and behind the loading screen; mid-round it goes through the server's action
-  const picker = new Picker(el("kiezer"), { onPick: (spec, free) => { if (free) applySpec(spec); else net.send("switch", { vehicle: spec.id }) } })
-  const lobby = (open) => { ladenEl.classList.toggle("met-kiezer", open); if (open) picker.show(car.spec.id, true); else picker.hide() }
+  // the picker: any vehicle, any time; the server hears about it through `switch` so the others swap your mesh
+  const picker = new Picker(el("kiezer"), { onPick: (spec) => { applySpec(spec); net.send("switch", { vehicle: spec.id }) } })
 
-  // the round: a new town restores the world and drops everyone on its spawn road behind the loading screen (a page
-  // load mid-round too, unless the URL asked for a spot)
-  const round = new Round(playerId, { ronde: el("ronde"), actie: el("actie"), banner: el("banner"), bannerTitel: el("banner-titel"), bannerSub: el("banner-sub"), flits: el("flits") }, {
-    onRound: (body, { fresh, live }) => {
-      if (fresh) {
-        chunks.reload(); index.resetRound(); combat.reset()
-        config.spawn = body.spawn
-        if (live || !urlSpawn) teleport(body.spawn.x, body.spawn.z, body.spawn.yaw)
-        if (body.status !== "ended") { loading.show(body.arena, body.id); lobby(true) }
-      }
-      index.applyAll(body.obstacles.concat(body.objects))
-      parade.setRound(round)
-      if (body.status === "ended") { loading.hide(); lobby(false) }
+  // the session: who you are in the world, and what the server decides about you
+  const session = new Session(playerId, { actie: el("actie"), banner: el("banner"), bannerTitel: el("banner-titel"), bannerSub: el("banner-sub"), flits: el("flits"), status: el("status") }, {
+    onSync: (msg) => {
+      // land at your last rest hub (unless the URL asked for a spot); the loading screen tells about the place meanwhile
+      if (!urlSpawn && msg.you.spawn) { config.spawn = msg.you.spawn; teleport(msg.you.spawn.x, msg.you.spawn.z, msg.you.spawn.yaw) }
+      const hub = hubs.find((h) => h.key === msg.you.spawn?.hub_key) ?? nearestHub(config.spawn.x, config.spawn.z, hubs)
+      if (hub && !loading.shown) loading.showHub(hub)
+      if (msg.you.vehicle && msg.you.vehicle !== car.spec.id && vehicleSpec(msg.you.vehicle).id === msg.you.vehicle) applySpec(vehicleSpec(msg.you.vehicle))
     },
     onObjects: (list) => index.applyAll(list),
-    onEnd: (msg) => { parade.hide(); combat.enabled = false; effects.confetti(msg.x, chunks.heightAt(msg.x, msg.z) + 4, msg.z) },
-    onAction: (msg) => {
-      if (msg.type === "teleport") teleport(msg.x, msg.z)
-      if (msg.type === "switch") { applySpec(vehicleSpec(msg.vehicle)); round.flash(`Je rijdt nu een ${car.spec.naam.toLowerCase()}`) }
+    onTeleport: (msg) => teleport(msg.x, msg.z, msg.yaw),
+    onSwitch: () => {},
+    onDeath: (msg) => {
+      if (msg.id === playerId) { burn(900); setTimeout(() => teleport(msg.respawn.x, msg.respawn.z, msg.respawn.yaw), 400) }
+      else effects.explosion(msg.x, chunks.heightAt(msg.x, msg.z) + 1, msg.z, 5)
     },
+    onBurn: (msg) => {
+      if (msg.id !== playerId) return
+      if (msg.shielded) return
+      burn(180); effects.shake(0.3); car.speed *= 0.7
+    },
+    onHeal: () => { chunks.reload(); index.resetState(); combat.reset() },
   })
-  picker.show(car.spec.id, true)
-  window.slop = { world, dayNight, car, remotes, chunks, round, parade, index, combat, effects, pickups, music, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
+  window.slop = { world, dayNight, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
   const net = new Network({ room: "main", onMessage: (m) => {
     if (m.type === "move" || m.type === "join" || m.type === "leave") { if (m.id !== playerId) remotes.receive(m); return }
     if (m.type === "fire") { if (m.id !== playerId) combat.remoteFire(m, remotes.get(m.id)?.mesh); return }
-    round.receive(m)
+    session.receive(m)
   } })
   const locator = new Locator(config.places)
+  const overlay = { hubs, discovered: session.discovered, objective: null }
   const minimap = new Minimap(el("minimap"), config, {
-    // a map click asks the server for a teleport; the car moves when the answer comes back
+    // a map click near a hub you have discovered asks the server for a teleport; the car moves when the answer comes back
     onTeleport: (x, z) => {
-      if (!round.running) { round.flash("Teleporteren kan alleen tijdens een ronde"); return false }
-      if (!round.canAct()) { round.flash(`Actie beschikbaar over ${round.countdown()}`); return false }
-      net.send("teleport", { x, z })
+      const hub = nearestHub(x, z, hubs, Math.max(400, minimap.view.scale * 12))
+      if (!hub) { session.flash("Klik op een plaats om erheen te reizen"); return false }
+      if (!session.discovered.has(hub.key)) { session.flash(`${hub.name} heb je nog niet ontdekt`); return false }
+      if (!session.canAct()) { session.flash(`Teleporteren kan weer over ${session.countdown()}`); return false }
+      net.send("teleport", { hub_key: hub.key })
     }
   })
 
@@ -122,7 +121,7 @@ async function main() {
 
   const kmh = el("kmh"), playersEl = el("players"), clockEl = el("clock"), cooldownBar = el("cooldown-bar")
   const boostEl = el("boost"), boostFill = el("boost-fill"), driftEl = el("drift"), pipsEl = el("drift-pips")
-  let shownLevel = -1, shownDrift = null, lastKmh = -1, lastMeter = -1, lastBoostOn = null   // DOM writes only on change
+  let shownLevel = -1, shownDrift = null, lastKmh = -1, lastMeter = -1, lastBoostOn = null, lastCooldown = -1   // DOM writes only on change
   const onPickup = (p) => {
     car.addBoost(TUNING.boost.pickupFill, TUNING.boost.pickupBurst)
     effects.flash(p.x, p.y + 0.6, p.z, 1.6); effects.shake(0.04)
@@ -132,6 +131,7 @@ async function main() {
   const timer = new THREE.Timer()
   let netTimer = 0, signTimer = 0, borderTimer = 0
   const heightAt = (x, z) => chunks.heightAt(x, z), tileIndex = (x, z) => chunks.tileIndex(x, z)
+  overlay.discovered = session.discovered
 
   function frame(now) {
     timer.update(now)
@@ -143,12 +143,7 @@ async function main() {
     car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)
     updateWater(dayNight.env, timer.getElapsed())
     if (input.toggleMap) minimap.toggle()
-    if (input.mute) round.flash(music.toggle() ? "Muziek uit" : "Muziek aan")
-    if (input.pick) {
-      if (!round.running) picker.show(car.spec.id, true)
-      else if (round.canAct()) picker.show(car.spec.id, false)
-      else round.flash(`Actie beschikbaar over ${round.countdown()}`)
-    }
+    if (input.pick) picker.show(car.spec.id, true)
     const digit = input.digit
     if (digit) picker.digit(digit)
     if (chunks.ready(car.x, car.z)) {
@@ -165,7 +160,6 @@ async function main() {
         placed = true
       }
       car.integrate(dt, input)
-      combat.enabled = round.running
       combat.collide(car, dt)
       car.settle(heightAt)
       combat.abilities(car, input, dt)
@@ -192,11 +186,10 @@ async function main() {
     world.followCamera(car, dt)
     effects.update(dt, world.camera)
     remotes.update(car, world.camera)
-    parade.update(round.now(), dt, chunks, car, world.camera)
-    if (loading.open && round.running && chunks.readyFraction(car.x, car.z) >= 1) { loading.hide(); lobby(false) }
+    if (loading.open && placed && chunks.readyFraction(car.x, car.z) >= 1) loading.hide()
 
     netTimer += dt
-    if (netTimer > 0.1) { netTimer = 0; net.sendMove(car.state()); combat.flush() }
+    if (netTimer > 0.1) { netTimer = 0; net.sendMove({ ...car.state(), vehicle: car.spec.id }); combat.flush() }
 
     signTimer += dt
     if (signTimer > 0.25) {
@@ -209,15 +202,15 @@ async function main() {
       placeEl.hidden = !locator.place
       biomeEl.textContent = chunks.biomeAt(car.x, car.z) ?? ""
       clockEl.textContent = dayNight.clock()
-      round.hud()
-      if (loading.open) loading.progress(chunks.readyFraction(car.x, car.z), round.running ? null : Math.max(0, Math.ceil(((round.round?.next_at ?? 0) - round.now()) / 1000)))
-      music.update(!!round.round && round.status !== "ended", parade.mesh.visible ? Math.hypot(parade.x - car.x, parade.z - car.z) : Infinity)
+      session.hud()
+      if (loading.open) loading.progress(placed ? chunks.readyFraction(car.x, car.z) : 0)
     }
-    minimap.update(car, remotes, round)
+    minimap.update(car, remotes, overlay)
 
     const shownKmh = Math.round(Math.hypot(car.vx, car.vz) * 3.6)
     if (shownKmh !== lastKmh) { lastKmh = shownKmh; kmh.textContent = shownKmh }
-    cooldownBar.style.transform = `scaleX(${(1 - combat.cooldownFraction).toFixed(3)})`
+    const cooldown = Math.round((1 - combat.cooldownFraction) * 100) / 100
+    if (cooldown !== lastCooldown) { lastCooldown = cooldown; cooldownBar.style.transform = `scaleX(${cooldown})` }
     const meter = Math.round(car.boostMeter * 200) / 200
     if (meter !== lastMeter) { lastMeter = meter; boostFill.style.transform = `scaleX(${meter})` }
     const boostOn = car.boostPower > 0.3

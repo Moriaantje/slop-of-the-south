@@ -1,7 +1,8 @@
-// The loading screen between rounds, GTA style: a photograph of the town, its name, what Wikipedia says about it and
-// a bar for the tiles streaming in around the spawn. Shown when a new town is announced, gone once the round runs
-// and the tiles are in. Pictures crossfade every few seconds.
+// The loading screen, GTA style: a photograph of the place you arrive at, its name, what Wikipedia says about it and
+// a bar for the tiles streaming in around the spawn. Shown at the first join (and after a teleport to a hub), gone
+// once the tiles are in. Pictures crossfade every few seconds.
 const PHOTO_MS = 6000
+const KOP = { town: "Welkom in", lair: "Drakennest", shrine: "Bedevaart naar", shop: "Handelspost" }
 
 export class LoadingScreen {
   constructor(el) {
@@ -15,21 +16,29 @@ export class LoadingScreen {
     this.images = []
     this.i = 0
     this.timer = null
+    this.shown = false
   }
 
   get open() { return !this.el.hidden }
 
-  show(arena, roundId) {
-    const info = arena.info ?? {}
-    this.kop.textContent = `Ronde ${roundId} · Vastelaovend in`
-    this.titel.textContent = arena.name
+  // a hub from /api/world; its Wikipedia lore is fetched from /api/hubs/:key while the screen is up
+  showHub(hub) {
+    this.shown = true
+    this.show({ name: hub.name, kop: KOP[hub.role] ?? "Welkom in", info: {} })
+    fetch(`/api/hubs/${hub.key}`).then((r) => (r.ok ? r.json() : null)).then((h) => {
+      if (h?.lore && this.open && this.titel.textContent === hub.name) this.show({ name: hub.name, kop: KOP[hub.role] ?? "Welkom in", info: h.lore })
+    }).catch(() => {})
+  }
+
+  show({ name, kop, info = {} }) {
+    this.kop.textContent = kop
+    this.titel.textContent = name
     this.info.textContent = info.extract ?? ""
     this.images = info.images ?? []
     this.i = 0
     this.next()
     clearInterval(this.timer)
     if (this.images.length > 1) this.timer = setInterval(() => this.next(), PHOTO_MS)
-    this.progress(0, null)
     this.el.hidden = false
   }
 
@@ -41,10 +50,10 @@ export class LoadingScreen {
     this.fotos.forEach((f) => f.classList.toggle("on", f === layer))
   }
 
-  // fraction: tiles in around the car; secondsLeft: until the parade starts (null while it already runs)
-  progress(fraction, secondsLeft) {
+  // fraction: tiles in around the car
+  progress(fraction) {
     this.balk.style.width = `${Math.round(fraction * 100)}%`
-    this.status.textContent = fraction < 1 ? "Laden…" : secondsLeft === null ? "Daar geit 'r!" : `Optocht start over ${secondsLeft} s`
+    this.status.textContent = fraction < 1 ? "Laden…" : "Daar geit 'r!"
   }
 
   hide() {

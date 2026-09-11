@@ -3,6 +3,7 @@ Rails.application.routes.draw do
 
   namespace :api do
     get "world",         to: "world#show"
+    get "hubs/:key",     to: "hubs#show", constraints: { key: /[po]:[nwr]?\d+/ }
     get "tiles/:tx/:ty", to: "tiles#show", constraints: { tx: /-?\d+/, ty: /-?\d+/ }
     get "map/overview",  to: "map#overview"
     get "map/:mx/:my",   to: "map#cell", constraints: { mx: /-?\d+/, my: /-?\d+/ }

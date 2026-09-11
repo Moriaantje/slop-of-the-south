@@ -1,6 +1,7 @@
-# One room = one stream. Clients send `move` ~10x/second, which the server relays, plus the round-mode actions:
-# `hit` reports damage, `fire` shows a shot to the others, `teleport` and `switch` spend the shared action. The
-# room's Game::RoundManager owns the round; a new subscriber gets the whole state in a `sync`.
+# One room = one stream, plus a personal stream per player for what only they should hear (their hp, gold, quests).
+# Clients send `move` ~10x/second, which the server relays; `hit` reports damage, `fire` shows a trick to the
+# others, `teleport` jumps to a discovered hub, `switch` picks a vehicle. The room's Game::WorldManager owns the
+# world; a new subscriber gets the whole state in a `sync`.
 class GameChannel < ApplicationCable::Channel
   RATES = { "move" => 15, "hit" => 20, "fire" => 10, "teleport" => 2, "switch" => 2 }.freeze   # messages per second
   MAX_HITS = 32
@@ -10,6 +11,7 @@ class GameChannel < ApplicationCable::Channel
     @name = params[:name].to_s.strip.first(16).presence || "Chauffeur"
     @last = Hash.new(0.0)
     stream_from stream_name
+    stream_from "#{stream_name}:p:#{player_id}"
     transmit manager.join(player_id, @name).merge(type: "sync")
     broadcast(type: "join", name: @name)
   end
@@ -19,16 +21,17 @@ class GameChannel < ApplicationCable::Channel
     broadcast(type: "leave")
   end
 
-  # data: { x, y, z, yaw, speed, brake, drift, boost, vehicle } — drift/boost drive the smoke and flames on other screens
+  # data: { x, y, z, yaw, speed, brake, drift, boost, vehicle, shield, air } — drift/boost drive the smoke and flames
+  # on other screens, shield/air the mech's bubble and jump
   def move(data)
     return unless allowed?("move")
     vehicle = data["vehicle"].to_s.first(16)
-    manager.moved(player_id, data["x"].to_f, data["z"].to_f, vehicle)
+    manager.moved(player_id, data["x"].to_f, data["z"].to_f, vehicle, yaw: data["yaw"].to_f, speed: data["speed"].to_f, shield: data["shield"] == true)
     broadcast(
       type: "move", name: @name, vehicle:,
       x: data["x"].to_f, y: data["y"].to_f, z: data["z"].to_f,
       yaw: data["yaw"].to_f, speed: data["speed"].to_f, brake: data["brake"] == true,
-      drift: data["drift"] == true, boost: data["boost"] == true,
+      drift: data["drift"] == true, boost: data["boost"] == true, shield: data["shield"] == true, air: data["air"] == true,
       t: Game.now_ms
     )
   end
@@ -43,17 +46,19 @@ class GameChannel < ApplicationCable::Channel
     manager.hit(player_id, hits) if hits.any?
   end
 
-  # data: { kind, x, y, z, yaw }: a shot the other players draw, nothing more
+  # data: { kind, x, y, z, yaw, pitch, target }: a shot the other players draw, nothing more
   def fire(data)
     return unless allowed?("fire")
+    target = data["target"].to_s.first(16)
     broadcast(type: "fire", name: @name, kind: data["kind"].to_s.first(16),
-              x: data["x"].to_f, y: data["y"].to_f, z: data["z"].to_f, yaw: data["yaw"].to_f, t: Game.now_ms)
+              x: data["x"].to_f, y: data["y"].to_f, z: data["z"].to_f, yaw: data["yaw"].to_f, pitch: data["pitch"].to_f,
+              target: target.presence, t: Game.now_ms)
   end
 
-  # data: { x, z }
+  # data: { hub_key }: to a hub you have discovered
   def teleport(data)
     return unless allowed?("teleport")
-    answer manager.teleport(player_id, data["x"].to_f, data["z"].to_f)
+    answer manager.teleport(player_id, data["hub_key"].to_s.first(24))
   end
 
   # data: { vehicle }
@@ -64,7 +69,7 @@ class GameChannel < ApplicationCable::Channel
 
   private
 
-  def manager = Game::RoundManager.for(@room)
+  def manager = Game::WorldManager.for(@room)
   def stream_name = "game:#{@room}"
 
   def allowed?(action)

@@ -24,7 +24,7 @@ export class Combat {
     this.send = send
     this.pending = new Map()        // key → { damage, max } since the last flush
     this.lastRam = new WeakMap()    // object → time of the last ram, so a standing car does not hammer it
-    this.enabled = false            // only while a round is running
+    this.enabled = true             // the world is always live; a heal (empty room) resets it
     this.shots = []                 // { mesh, x, y, z, vx, vy, vz, gravity, life, r, dmg, own }
     this.charge = null              // the brommer's sticky bomb, one at a time
     this.swing = null               // the crane's swing in progress

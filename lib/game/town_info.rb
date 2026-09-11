@@ -6,7 +6,9 @@ module Game
   module TownInfo
     API = "https://nl.wikipedia.org/api/rest_v1/page"
     HEADERS = { "User-Agent" => "SlopOfTheSouth/1.0 (mijnstreek driving game)", "Accept" => "application/json" }.freeze
-    KIND_NL = { "city" => "stad", "town" => "stadje", "village" => "dorp" }.freeze
+    KIND_NL = { "city" => "stad", "town" => "stadje", "village" => "dorp", "castle" => "kasteel", "ruins" => "ruïne", "abbey" => "abdij",
+                "church" => "kerk", "chapel" => "kapel", "mill" => "molen", "monument" => "monument", "stadium" => "stadion",
+                "industrial" => "industrieterrein", "museum" => "museum" }.freeze
     @cache = {}
 
     def self.fetch(name, kind)

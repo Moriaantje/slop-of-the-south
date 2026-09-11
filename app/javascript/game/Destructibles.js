@@ -96,7 +96,7 @@ export class Destructibles {
 
   applyAll(list) { for (const o of list) if (o.hp !== null && o.hp !== undefined) this.apply(o.key, o.hp, o.max, o.state) }
 
-  resetRound() { this.state.clear() }
+  resetState() { this.state.clear() }
 
   // the round was lost here: everything within r goes, without a word to the server
   cosmeticWipe(x, z, r) {

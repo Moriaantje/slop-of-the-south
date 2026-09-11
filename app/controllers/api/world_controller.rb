@@ -6,11 +6,12 @@ module Api
         tile_size: World::TILE_SIZE,
         height_step: World::HEIGHT_STEP,
         height_n: World::HEIGHT_N,
-        # Spawn in game units: on Rijksweg Noord in Geleen (RD ≈ 186293, 331407), facing north-north-east
-        # towards Sittard. yaw is radians, 0 = north, positive turns left; see Vehicle.js.
-        spawn: { x: 1293.2, z: -1406.9, yaw: -0.611 },
+        # where a new player starts until they have a hub of their own (game units; see Game::WORLD_SPAWN)
+        spawn: Game::WORLD_SPAWN,
         # Towns, villages and districts (game units) for the street sign
         places: Place.for_client,
+        # the hubs: towns, lairs, shrines and shops with their spawn road and the people standing there
+        hubs: Hub.all_for_client,
         # play area in RD metres [x0, y0, x1, y1] (the minimap shows this when expanded)
         bounds: World.bounds_rd,
         # province border rings in game units: outside them is a wall of flames
@@ -18,7 +19,7 @@ module Api
         # changes whenever tiles:build rewrites public/tiles, so browsers drop their cached tile files (the static
         # file server sends a two-day max-age)
         tiles_version: (dir = Rails.root.join("public", "tiles")).exist? ? File.mtime(dir).to_i : 0,
-        # server clock in milliseconds; the client offsets Date.now() by it so every player sees the same round
+        # server clock in milliseconds; the client offsets Date.now() by it so every player sees the same world
         now: Game.now_ms
       }
     end

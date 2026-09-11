@@ -61,7 +61,7 @@ in the game's about screen.
 ### 1.4 Pipeline
 
     Overpass/PBF ──► PostGIS (roads, buildings; EPSG:28992)
-    AHN GeoTIFF  ──► gdalwarp ──► data/dem.asc (10 m ASCII grid, EPSG:28992)
+    AHN GeoTIFF  ──► gdal_fillnodata / gdal_translate ──► data/dem.raw + dem.json (10 m Float32 grid, EPSG:28992)
                                     │
                                     ▼
                       rake tiles:build ──► public/tiles/{tx}_{ty}.json
@@ -159,13 +159,12 @@ comes from `localStorage.driverName`, settable with `?name=Pietje`.
     game/Network.js          Action Cable
     game/RemoteCars.js       interpolation of other players, their wheels, smoke and flames, their vehicle meshes
     game/Beacon.js           sky label with a line down: other players and the parade float
-    game/Round.js            the round as the server tells it: town, route, obstacles, clock offset, action cooldown, HUD
-    game/Parade.js           the praalwagen on its route (position from the shared clock), the red ribbon, the beacon
+    game/Session.js          you in the world as the server tells it: clock offset, hp/gold/xp, discovered hubs, teleport cooldown, HUD
     game/Destructibles.js    every object a player can flatten: 25 m grid, hit tests, collapse/hide, rubble heaps
     game/Combat.js           ramming, rubble, the six tricks, projectiles, explosions and knockback, `hit` batches
     game/Effects.js          flashes, debris, dust, confetti, camera shake, sprite pools
     game/Vehicles.js         the roster (specs + box-built meshes), game/Picker.js the six cards
-    game/LoadingScreen.js    town photo, name and story between rounds; game/Music.js the YouTube player
+    game/LoadingScreen.js    place photo, name and Wikipedia story while the tiles stream in (first join, teleports)
 
 ### 1.7 Milestones
 
@@ -174,42 +173,45 @@ comes from `localStorage.driverName`, settable with `?name=Pietje`.
 3. **Real terrain** — AHN heights; buildings sit correctly on slopes. *(done: `dem:fetch dem:build`, 10 m grid from PDOK WCS)*
 4. **Multiplayer** — see each other drive; name tags. *(channel + client already scaffolded)*
 5. **Feel** — sound, skid marks, better car model, day/night, collisions with buildings.
-6. **Game** — *(done: the vastelaovend parade, see 1.8)*. Later: time trials, leaderboards, a "deliver the vlaai" mode.
+6. **Game** — *(the fantasy layer, see 1.8: hubs from real hotspots and persistent players done; quests, dragons and the wizard mech follow)*.
 7. **Scale** — full bounding box (WORLD_BBOX=full for every fetch task); the Maas and Julianakanaal lie just outside the phase-1 box. *(trees, water, land cover done via BGT)*
 
-### 1.8 Vastelaovend: the parade round
+### 1.8 The fantasy layer: hubs, quests, dragons
 
-A Blast Corps-style co-op round, fifteen minutes each. A praalwagen rolls in a straight line across a 2.5 km square
-around a random Limburg town; if it reaches any standing building, tree, lamp post, traffic light or sign the
-parade is stuck and the round is lost. Players clear the route together. Flattened buildings leave rubble that has
-to be cleared too. The float plays a vastelaovend playlist, louder the closer you are (N mutes).
+The province is a persistent open world (no rounds). Real-world hotspots are its hubs: every city, town and village
+is a **town** with quest givers; landmarks imported from OpenStreetMap become **lairs** (castles, ruins, the Fortuna
+stadium, big industrial sites), **shrines** (churches, chapels, abbeys — a church inside a town becomes the town's
+kapelaan instead) and **shops** (mills, monuments, museums). `bin/rails pois:import hubs:build` (or the Overpass pair
+`pois:fetch pois:import_overpass` for a small `WORLD_BBOX`) derives them; a hub's key comes from the OSM id so it
+survives re-imports. Each hub gets a spawn on the nearest drivable road and one to four people on the sidewalk,
+placed and named deterministically from the key (`Hub.build!`, `Game::Names`). `/api/world` serves the hubs,
+`/api/hubs/:key` adds what the Dutch Wikipedia says about the place (`Game::TownInfo`), shown on the loading screen.
 
-**Rounds.** `Game::RoundManager` (lib/game) owns the round per room from a thread that ticks four times a second,
-started by the first subscription so it lives in the Puma process (the development cable adapter is in-process):
-idle → intermission (20 s, a new town) → running → ended (8 s) → intermission. `Game::Arena` picks a town whose
-arena lies inside the province, draws the route through it at a random heading, lists everything in the float's
-6 m corridor with the distance at which its nose arrives (PostGIS), rejects corridors with fewer than 15 or more
-than 250 obstacles or one within 120 m of the start, finds a spawn road, and asks `Game::TownInfo` for the town's
-Wikipedia paragraph and photographs. The float's position is a pure function of the start time and speed, so the
-clients render it from a clock offset (`now` on every manager message) without traffic. `Game::Round` owns hit
-points: a client reports damage with the object's size-based maximum, buildings crumble to rubble at zero (half
-their points back) and then to gone, everything else goes at once; verdicts leave in one coalesced `object`
-message per tick. Every new town restores the world: the clients drop and re-stream their tiles.
+**World state.** `Game::WorldManager` (lib/game) owns a room from a thread that ticks four times a second, started
+by the first subscription so it lives in the Puma process: the players' sessions (loaded from and saved to the
+`players` table, keyed by the signed `player_id` cookie), the destruction verdicts (`Game::Destructibles`: clients
+report damage with the object's size-based maximum, buildings crumble to rubble at zero and then to gone, verdicts
+leave in one coalesced `object` message per tick), hp/gold/xp, discovery (150 m from a hub centre: +15 xp, and the
+hub becomes a teleport target), regeneration (fast inside a hub, slow elsewhere), death and respawn at the last hub
+you stood in, and a `heal` of the world once the room has been empty for five minutes. Dragons plug into the
+manager's `actors:` slot and quests into `quests:` (next phases). Positions stay client-authoritative.
 
 **Objects.** Keys: `m:<BAG id>` for LoD2.2 meshes (with a 2D footprint `fp` in the tile), `b:<id>` for extruded
 buildings, and `t/l/g/s:<dm x>,<dm z>` for trees, lamps, traffic lights and signs from their tile coordinates,
 which both sides round to a decimetre. The tile builders register a handle per object (vertex range or instance
-index) and `Destructibles.js` keeps them in a grid for the car and the weapons.
+index) and `Destructibles.js` keeps them in a grid for the vehicles and the weapons.
 
 **Vehicles.** Brommer (fastest, sticky charge), trike (missiles), monstertruck (jump), tank (slugs), bulldozer
-(rams through, clears rubble in one pass) and sloopkraan (wrecking ball). E fires the trick; a shared action
-(teleport from the map or vehicle switch) has a minute of cooldown, reset at every new town; switching is free
-between rounds. Explosions shove nearby cars, nobody dies.
+(rams through, clears rubble in one pass), sloopkraan (wrecking ball) and, coming, the wizard mech. V picks, any
+time, for free; E fires the trick. Teleporting from the map to a discovered hub has a minute of cooldown.
+Explosions shove nearby cars; dragon fire hurts.
 
-**Protocol.** Server → client: `sync` (on subscribe), `round` (status changes), `object`, `end`, `teleport` and
-`switch` verdicts, plus the relayed `move` (with `vehicle`, `drift`, `boost`) and `fire`. Client → server: `move`,
-`hit {hits: [{key, damage, max}]}`, `fire`, `teleport {x, z}`, `switch {vehicle}`. Tunables are the constants at
-the top of `lib/game/*.rb`, `Vehicles.js` and `Combat.js`. `bin/rails test` covers the round logic and the channel.
+**Protocol.** Room stream `game:<room>` and a personal stream `game:<room>:p:<id>`. Server → client: `sync` (on
+subscribe: you, players, objects, actors, quests), `you` (hp/gold/xp/level), `discover`, `object`, `burn`, `death`,
+`heal`, `teleport`/`switch` verdicts, plus the relayed `move` (with `vehicle`, `drift`, `boost`, `shield`, `air`) and
+`fire`. Client → server: `move`, `hit {hits: [{key, damage, max}]}`, `fire`, `teleport {hub_key}`, `switch {vehicle}`.
+Tunables are the constants at the top of `lib/game/*.rb`, `Vehicles.js`, `Combat.js` and `Tuning.js`.
+`bin/rails test` covers the world manager, hub building, the landmark mapping and the channel.
 
 ---
 
@@ -227,16 +229,39 @@ bin/rails importmap:install
 # three.js and its addons are vendored into vendor/javascript (see config/importmap.rb)
 ```
 
-Edit `config/database.yml` and set `adapter: postgis` for every environment.
+`config/database.yml` already uses `adapter: postgis` and connects over the local socket with libpq's defaults, so a
+PostGIS server on another port only needs `export PGPORT=5433` (or `PGHOST`) in the shell. Ruby is `.ruby-version`
+4.0.6 via mise; in a shell where mise is not activated, prefix commands with `mise exec --`.
 
 The world is the province of Limburg by default (`WORLD_BBOX=limburg`; `phase1` = Sittard–Geleen, `full` = the
 Mijnstreek box). Every task below works on that area.
+
+**Quick start for a small world** (Sittard–Geleen, ~2 GB of downloads, 402 tiles, about half an hour):
+
+```bash
+export WORLD_BBOX=phase1            # and PGPORT=5433 if your PostGIS listens there
+bin/rails db:create db:migrate
+bin/rails border:fetch
+OVERPASS_URL=https://maps.mail.ru/osm/tools/overpass/api/interpreter bin/rails osm:fetch osm:import   # overpass-api.de answers 406 to Net::HTTP
+bin/rails dem:fetch dem:build
+bin/rails bag3d:fetch bag3d:import
+bin/rails bgt:fetch bgt:import
+BGT_BULK_TYPES=paal MUNICIPALITIES=Sittard-Geleen,Beek,Stein,Beekdaelen bin/rails bgt:bulk_fetch
+bin/rails bgt:paal_import
+bin/rails pois:fetch pois:import_overpass hubs:build   # landmarks + hubs for the small box
+WORKERS=6 bin/rails tiles:build
+bin/rails map:build
+bin/dev
+```
+`tiles:build` forks its workers; on macOS libpq's GSS negotiation is not fork-safe, so the task sets
+`PGGSSENCMODE=disable` itself and aborts if a worker dies (then also try `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES`).
 
 ```bash
 bin/rails db:create db:migrate
 bin/rails border:fetch         # Limburg province polygon (PDOK) → boundaries table; the edge of the world
 bin/rails osm:pbf_fetch        # Geofabrik limburg-latest.osm.pbf (100 MB)
 bin/rails osm:pbf_import       # → roads (101k) and places (1k) via ogr2ogr
+bin/rails pois:import hubs:build # → landmarks (castles, churches, mills …) and the hubs with their people
 bin/rails bag3d:fetch          # 3D BAG GeoPackage tiles for the box → data/bag3d/tiles (1075 tiles, ~2.5 GB gz / 13 GB)
 bin/rails bag3d:import         # → PostGIS buildings (LoD1.3 parts) and building_meshes (LoD2.2)
 bin/rails bgt:bulk_fetch       # BGT extracts per municipality via PDOK's download API → data/bgt/bulk/*.zip (~5 GB)
@@ -254,9 +279,8 @@ bin/dev                        # Rails (Puma on :3000)
 ```
 
 For a small area (`WORLD_BBOX=phase1`) the paged alternatives still work: `osm:fetch osm:import` (Overpass) and
-`bgt:fetch bgt:import` (OGC API Features).
-
-Edit `config/database.yml` and set `adapter: postgis` for every environment.
+`bgt:fetch bgt:import` (OGC API Features). `tiles:build` builds every tile that has roads, buildings or trees, so the
+tile set follows what was imported.
 
 Open http://localhost:3000 in two browser windows and drive.
 
@@ -279,7 +303,7 @@ Open http://localhost:3000 in two browser windows and drive.
   on disk, so an empty database yields a flat 40 m NAP world and a 404 per tile in the dev log on first load.
 - With LoD2.2 buildings a dense town tile is about 1 MB of JSON (roughly 100 MB for phase 1). Fine locally; serve
   `public/tiles` gzipped (or move to a binary tile format) before putting it on the internet.
-Controls: W/↑ accelerate, S/↓ brake/reverse, A/D or ←/→ steer, Space handbrake, Shift boost, E trick, V vehicle
+Controls: W/↑ accelerate, S/↓ brake/reverse, A/D or ←/→ steer, Space handbrake, Shift boost, E trick, V vehicle (free, any time)
 picker (1–6 pick), N music, R reset to road, M expand the minimap (drag to pan, scroll to zoom, F fits the whole
 area, click to teleport, Esc closes). `?spawn=x,z,yaw` in the URL spawns at game coordinates, `?time=13` freezes
 the clock.

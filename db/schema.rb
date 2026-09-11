@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_11_000013) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_12_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -57,6 +57,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_000013) do
     t.index ["source"], name: "index_buildings_on_source"
   end
 
+  create_table "hubs", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.geometry "geom", limit: {srid: 28992, type: "st_point"}, null: false
+    t.string "key", null: false
+    t.string "kind", null: false
+    t.string "name", null: false
+    t.jsonb "npcs", default: [], null: false
+    t.integer "population"
+    t.string "role", null: false
+    t.string "source", null: false
+    t.jsonb "spawn", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geom"], name: "index_hubs_on_geom", using: :gist
+    t.index ["key"], name: "index_hubs_on_key", unique: true
+    t.index ["role"], name: "index_hubs_on_role"
+  end
+
   create_table "land_covers", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.geometry "geom", limit: {srid: 28992, type: "multi_polygon"}, null: false
@@ -80,6 +97,34 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_11_000013) do
     t.index ["geom"], name: "index_places_on_geom", using: :gist
     t.index ["kind"], name: "index_places_on_kind"
     t.index ["osm_id"], name: "index_places_on_osm_id", unique: true
+  end
+
+  create_table "players", id: :string, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "discovered", default: [], null: false, array: true
+    t.integer "gold", default: 0, null: false
+    t.integer "hp", default: 100, null: false
+    t.string "last_hub_key"
+    t.datetime "last_seen_at"
+    t.string "name"
+    t.datetime "updated_at", null: false
+    t.string "vehicle", default: "auto", null: false
+    t.integer "xp", default: 0, null: false
+  end
+
+  create_table "pois", force: :cascade do |t|
+    t.float "area"
+    t.datetime "created_at", null: false
+    t.geometry "geom", limit: {srid: 28992, type: "st_point"}, null: false
+    t.string "kind", null: false
+    t.string "name"
+    t.bigint "osm_id", null: false
+    t.string "osm_type", null: false
+    t.jsonb "tags", default: {}, null: false
+    t.datetime "updated_at", null: false
+    t.index ["geom"], name: "index_pois_on_geom", using: :gist
+    t.index ["kind"], name: "index_pois_on_kind"
+    t.index ["osm_type", "osm_id"], name: "index_pois_on_osm_type_and_osm_id", unique: true
   end
 
   create_table "poles", force: :cascade do |t|

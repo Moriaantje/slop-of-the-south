@@ -1,7 +1,7 @@
 // Minimap drawn from our own map data (see MapBuilder): an overview of the whole play area plus 1 km detail cells
 // fetched as you zoom in. Small: follows the car, north-up. Expanded (M): drag to pan, wheel to zoom around the
-// cursor, F fits the full bounds, a click teleports the car, Escape/M close. During a round it also shows the arena,
-// the parade route with the obstacles still standing on it, and the float itself.
+// cursor, F fits the full bounds, a click on a discovered hub teleports the car there, Escape/M close. Hubs (towns,
+// lairs, shrines, shops) are marked, grey until discovered; the active quest objective pulses.
 const SMALL_SCALE = 3.5          // m/px in the corner map
 const DETAIL_SCALE = 4.5         // load 1 km detail cells when zoomed in beyond this (the corner map included)
 const MIN_SCALE = 0.4            // max zoom-in
@@ -19,6 +19,7 @@ const ROAD = {
   tertiary: ["#fbeeb5", 1.5], tertiary_link: ["#fbeeb5", 1.0], default: ["#ffffff", 1.2]
 }
 const BUILDING = "#b7a597", TREE = "#5f8c3e", WATER_EDGE = "#7fa9cc"
+const MARKER = { town: "#0f3f8f", lair: "#c8201a", shrine: "#7a4fb0", shop: "#c98a12" }   // hub roles
 const BBOX = new WeakMap()       // flat coordinate array → [minX, minZ, maxX, maxZ]
 
 export class Minimap {
@@ -120,9 +121,9 @@ export class Minimap {
   toPixel(x, z) { return [this.w / 2 + (x - this.view.cx) / this.view.scale, this.h / 2 + (z - this.view.cz) / this.view.scale] }
   toWorld(px, py) { return [this.view.cx + (px - this.w / 2) * this.view.scale, this.view.cz + (py - this.h / 2) * this.view.scale] }
 
-  update(car, remotes, round) {
-    this.car = car; this.remotes = remotes; this.round = round
-    if (round?.running) this.dirty = true                          // the float moves even when the car stands still
+  update(car, remotes, overlay) {
+    this.car = car; this.remotes = remotes; this.overlay = overlay
+    if (overlay?.objective) this.dirty = true                        // the objective ring pulses even when the car stands still
     if (!this.expanded) {
       if (this.view.cx !== car.x || this.view.cz !== car.z) this.dirty = true
       this.view = { cx: car.x, cz: car.z, scale: SMALL_SCALE }
@@ -167,7 +168,7 @@ export class Minimap {
     ctx.fillStyle = BASE
     ctx.fillRect(0, 0, w, h)
     ctx.drawImage(L.canvas, w / 2 + ox - L.w / 2, h / 2 + oz - L.h / 2, L.w, L.h)
-    this.drawArena()
+    this.drawMarkers()
     if (this.expanded) this.drawLabels()
     this.drawCars()
     if (this.expanded) this.drawChrome()
@@ -329,30 +330,39 @@ export class Minimap {
     ctx.setLineDash([])
   }
 
-  // the round: the arena square, the parade route with the obstacles still standing on it, and the float
-  drawArena() {
-    const r = this.round?.round
-    if (!r) return
+  // the hubs: towns (dot), lairs (triangle), shrines (cross) and shops (square); grey until discovered. Labels for the
+  // landmarks when zoomed in; the active quest objective pulses amber.
+  drawMarkers() {
+    const o = this.overlay
+    if (!o?.hubs?.length) return
     const { ctx } = this
-    const a = r.arena, p = r.path
-    const [ax, ay] = this.toPixel(a.cx - a.half, a.cz - a.half), size = 2 * a.half / this.view.scale
-    ctx.strokeStyle = "#f2c14e"; ctx.lineWidth = 2; ctx.setLineDash([8, 4]); ctx.strokeRect(ax, ay, size, size)
-    ctx.strokeStyle = "#e0241a"; ctx.lineWidth = this.expanded ? 3 : 2.5; ctx.setLineDash([10, 6])
-    ctx.beginPath(); this.path([p.x0, p.z0, p.x1, p.z1]); ctx.stroke()
-    ctx.setLineDash([])
-    const [ex, ey] = this.toPixel(p.x1, p.z1)
-    ctx.fillStyle = "#e0241a"; ctx.beginPath(); ctx.arc(ex, ey, 4, 0, Math.PI * 2); ctx.fill()
-    ctx.fillStyle = "#8b1a1a"
-    for (const o of this.round.obstacles.values()) {
-      if (o.state === "gone") continue
-      const [px, py] = this.toPixel(o.x, o.z)
-      ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill()
+    const s = this.view.scale
+    const r = this.expanded ? 6 : 5
+    for (const h of o.hubs) {
+      if (h.role === "town" && s > 60) continue                        // towns already carry their place label at province scale
+      const [px, py] = this.toPixel(h.x, h.z)
+      if (px < -20 || py < -20 || px > this.w + 20 || py > this.h + 20) continue
+      const known = o.discovered?.has(h.key)
+      ctx.fillStyle = known ? MARKER[h.role] : "#9a9a9a"
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5
+      ctx.beginPath()
+      if (h.role === "lair") { ctx.moveTo(px, py - r * 1.2); ctx.lineTo(px + r * 1.1, py + r * 0.8); ctx.lineTo(px - r * 1.1, py + r * 0.8); ctx.closePath() }
+      else if (h.role === "shop") ctx.rect(px - r * 0.8, py - r * 0.8, r * 1.6, r * 1.6)
+      else if (h.role === "shrine") { ctx.rect(px - r * 0.3, py - r * 1.1, r * 0.6, r * 2.2); ctx.rect(px - r * 0.9, py - r * 0.5, r * 1.8, r * 0.6) }
+      else ctx.arc(px, py, r * 0.8, 0, Math.PI * 2)
+      ctx.fill(); ctx.stroke()
+      if (this.expanded && h.role !== "town" && s < 12) {
+        ctx.font = "bold 11px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "top"
+        ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.strokeText(h.name, px, py + r * 1.3)
+        ctx.fillStyle = known ? "#222" : "#777"; ctx.fillText(h.name, px, py + r * 1.3)
+      }
     }
-    if (r.status === "ended") return
-    const [kx, ky] = this.toPixel(...this.round.floatAt(this.round.now()))
-    ctx.fillStyle = "#f2c14e"; ctx.strokeStyle = "#111"; ctx.lineWidth = 2
-    ctx.beginPath(); ctx.arc(kx, ky, this.expanded ? 7 : 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
-    if (this.expanded) { ctx.font = "bold 12px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillStyle = "#111"; ctx.fillText("optocht", kx, ky - 9) }
+    if (o.objective) {
+      const [px, py] = this.toPixel(o.objective.x, o.objective.z)
+      const pulse = 8 + 3 * Math.sin(performance.now() / 250)
+      ctx.strokeStyle = "#f2a11e"; ctx.lineWidth = 3
+      ctx.beginPath(); ctx.arc(px, py, pulse, 0, Math.PI * 2); ctx.stroke()
+    }
   }
 
   drawCars() {

@@ -24,6 +24,10 @@ ORDER BY tx, ty
 
 # WORKERS=n (default 4) forks n processes, each building every n-th tile
 workers = ENV.fetch("WORKERS", "4").to_i.clamp(1, 16)
+# libpq's GSS/Kerberos negotiation goes through macOS frameworks that are not fork-safe: a forked child segfaults in
+# connect_start. Skipping GSS encryption (we connect over a local socket anyway) avoids it; OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
+# in the shell covers the rest of the Objective-C runtime.
+ENV["PGGSSENCMODE"] ||= "disable"
 ActiveRecord::Base.connection_pool.disconnect!
 pids = workers.times.map do |w|
   Process.fork do
@@ -35,8 +39,10 @@ pids = workers.times.map do |w|
     end
   end
 end
-pids.each { |pid| Process.wait(pid) }
-puts "\nWrote #{rows.size} tiles to #{out} with #{workers} workers"
+failed = pids.count { |pid| Process.wait(pid); !$?.success? }
+written = Dir[out.join("*.json").to_s].size
+puts "\nWrote #{written} of #{rows.size} tiles to #{out} with #{workers} workers"
+abort "#{failed} worker(s) died — on macOS run with OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES (see README)" if failed.positive?
   end
 
   desc "Delete built tiles"
