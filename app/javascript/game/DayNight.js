@@ -1,10 +1,10 @@
 import * as THREE from "three"
 
-// A full day every 12 minutes, on the wall clock so every player shares the same time of day. Sunrise at 06:00,
+// A full day every 6 minutes, on the wall clock so every player shares the same time of day. Sunrise at 06:00,
 // noon at 12:00, sunset at 18:00 game time. The sun light swings east → south → west and fades out; the sky,
 // fog and hemisphere light darken to a moonlit blue; `darkness` (0 day … 1 night) drives street lamps, headlights
 // and sign reflectivity. ?time=21.5 in the URL freezes the clock at that hour (handy for looking at the night).
-export const DAY_SECONDS = 720
+export const DAY_SECONDS = 360
 const SKY_DISTANCE = 3200                                    // inside the camera's far plane, beyond the loaded tiles
 
 const DAY_SKY = new THREE.Color(0x9fb8cf), DUSK_SKY = new THREE.Color(0xe39a6c), NIGHT_SKY = new THREE.Color(0x0a0f1d)

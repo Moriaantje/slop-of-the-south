@@ -78,7 +78,7 @@ Tiles are static JSON served by nginx/Rails' static file server — no DB hit wh
 
 ### 1.4a Time of day
 
-A full day takes 12 real minutes (`game/DayNight.js`, `DAY_SECONDS`), on the wall clock so every player sees the same
+A full day takes 6 real minutes (`game/DayNight.js`, `DAY_SECONDS`), on the wall clock so every player sees the same
 time; the HUD shows the game clock. Sunrise 06:00, noon 12:00, sunset 18:00, twilight until about 19:00. The sun
 light swings east → south → west and gives way to a faint moon; sky, fog and hemisphere light darken with it. The sky
 is a shaded dome around the camera (horizon → zenith gradient per phase, a glow banked around the sun at dawn and
@@ -92,6 +92,11 @@ two spotlights on the player's car, emissive headlights and tail lights on every
 (the brake flag travels with the position over Action Cable). `?time=22.5` freezes the clock at that hour.
 
 ### 1.5 Multiplayer
+
+Every other player carries a beacon (`game/RemoteCars.js`): a label with their name and distance in km floating in the
+sky above their car with a line down to it. It is always in view: labels of players farther than 3 km are drawn 3 km
+out in their direction and climb with the distance, so you can head towards anyone in the province. Your own name
+comes from `localStorage.driverName`, settable with `?name=Pietje`.
 
 - One `GameChannel` per room (default room `"main"`).
 - Clients send `move` at 10 Hz: `{x, y, z, yaw, speed}`. Server stamps it with the player id and

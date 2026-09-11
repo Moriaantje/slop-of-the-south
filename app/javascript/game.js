@@ -32,7 +32,10 @@ async function main() {
   const remotes = new RemoteCars(world.scene)
   const dayNight = new DayNight(world)
   const clockEl = document.getElementById("clock")
-  window.slop = { world, dayNight, car }              // for poking at the scene from the console
+  window.slop = { world, dayNight, car, remotes }     // for poking at the scene from the console
+  // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
+  const nameParam = new URLSearchParams(location.search).get("name")
+  if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
   const net     = new Network({ room: "main", playerId, onMessage: (m) => remotes.receive(m) })
   const locator = new Locator(config.places)
   const minimap = new Minimap(document.getElementById("minimap"), config, {
@@ -95,7 +98,7 @@ async function main() {
       }
     }
     world.followCamera(car, dt)
-    remotes.update()
+    remotes.update(car, world.camera)
 
     netTimer += dt
     if (netTimer > 0.1) { netTimer = 0; net.sendMove(car.state()) }
