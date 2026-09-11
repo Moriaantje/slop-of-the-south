@@ -44,7 +44,9 @@ export class Vehicle {
   // darkness 0..1 (DayNight): headlights on in the dark, dim running lights by day
   setNight(darkness) {
     this.darkness = darkness
-    for (const spot of this.spots) spot.intensity = 140 * darkness * darkness
+    // by day the spotlights are switched off entirely: an active light at intensity 0 still costs every lit material two
+    // spot-light evaluations per fragment (the shaders recompile once at dusk and dawn)
+    for (const spot of this.spots) { spot.intensity = 140 * darkness * darkness; spot.visible = darkness > 0.02 }
     this.lights.head.emissiveIntensity = 0.35 + 2.2 * darkness
     this.updateTail()
   }

@@ -93,7 +93,7 @@ async function main() {
 
   const kmh = el("kmh"), playersEl = el("players"), clockEl = el("clock")
   const boostEl = el("boost"), boostFill = el("boost-fill"), driftEl = el("drift"), pipsEl = el("drift-pips")
-  let shownLevel = -1, shownDrift = null
+  let shownLevel = -1, shownDrift = null, lastKmh = -1, lastMeter = -1, lastBoostOn = null   // DOM writes only on change
   const onPickup = (p) => {
     car.addBoost(TUNING.boost.pickupFill, TUNING.boost.pickupBurst)
     effects.flash(p.x, p.y + 0.6, p.z, 1.6); effects.shake(0.04)
@@ -173,9 +173,12 @@ async function main() {
     }
     minimap.update(car, remotes, round)
 
-    kmh.textContent = Math.round(Math.hypot(car.vx, car.vz) * 3.6)
-    boostFill.style.transform = `scaleX(${car.boostMeter.toFixed(3)})`
-    boostEl.classList.toggle("on", car.boostPower > 0.3)
+    const shownKmh = Math.round(Math.hypot(car.vx, car.vz) * 3.6)
+    if (shownKmh !== lastKmh) { lastKmh = shownKmh; kmh.textContent = shownKmh }
+    const meter = Math.round(car.boostMeter * 200) / 200
+    if (meter !== lastMeter) { lastMeter = meter; boostFill.style.transform = `scaleX(${meter})` }
+    const boostOn = car.boostPower > 0.3
+    if (boostOn !== lastBoostOn) { lastBoostOn = boostOn; boostEl.classList.toggle("on", boostOn) }
     const driftShown = car.drifting && !car.driftMild
     if (driftShown !== shownDrift) { shownDrift = driftShown; driftEl.hidden = !driftShown }
     if (driftShown && car.chargeLevel !== shownLevel) {

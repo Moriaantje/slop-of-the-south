@@ -50,9 +50,9 @@ export class Pickups {
     const pads = placePads(tile.key, tile.roads, (x, z) => tile.terrain.heightAt(x, z))
     if (!pads.length) return
     const mesh = new THREE.InstancedMesh(ringGeo, padMat, pads.length)
-    mesh.frustumCulled = false
     pads.forEach((p, i) => { p.taken = 0; p.index = i; this.matrix(p, 0); mesh.setMatrixAt(i, _m) })
     mesh.instanceMatrix.needsUpdate = true
+    mesh.computeBoundingSphere()                     // so the tile's pads are frustum-culled like everything else
     tile.group.add(mesh)
     this.tiles.set(tile.key, { mesh, pads })
   }
@@ -61,19 +61,22 @@ export class Pickups {
 
   matrix(p, spin) {
     _q.setFromAxisAngle(_up, p.yaw + spin)
-    _v.set(p.x, p.y + 0.02 * Math.sin(this.time * 2 + p.x), p.z)
+    _v.set(p.x, p.y, p.z)
     return _m.compose(_v, _q, _s)
   }
 
-  // spin, pulse and respawn
+  // pulse every frame (one material write); spin and respawn at 10 Hz so the instance buffers are not re-uploaded per frame
   update(dt) {
     this.time += dt
     padMat.opacity = 0.62 + 0.2 * Math.sin(this.time * 3)
+    this.tick = (this.tick ?? 0) + dt
+    if (this.tick < 0.1) return
+    const step = this.tick; this.tick = 0
     const spin = this.time * 1.2
     for (const t of this.tiles.values()) {
       let dirty = false
       for (const p of t.pads) {
-        if (p.taken > 0) { p.taken -= dt; if (p.taken > 0) continue; p.taken = 0 }
+        if (p.taken > 0) { p.taken -= step; if (p.taken > 0) continue; p.taken = 0 }
         t.mesh.setMatrixAt(p.index, this.matrix(p, spin)); dirty = true
       }
       if (dirty) t.mesh.instanceMatrix.needsUpdate = true

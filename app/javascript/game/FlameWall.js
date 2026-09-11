@@ -19,7 +19,7 @@ const material = new THREE.ShaderMaterial({
       vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
     }
-    float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.1; a *= 0.5; } return v; }
+    float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 3; i++) { v += a * noise(p); p *= 2.1; a *= 0.5; } return v; }
     void main() {
       // vUv.x runs along the wall in units of ~40 m, vUv.y from 0 (ground) to 1 (top)
       float n = fbm(vec2(vUv.x * 1.5, vUv.y * 3.0 - time * 0.9));
@@ -33,17 +33,26 @@ const material = new THREE.ShaderMaterial({
 })
 material.__shared = true
 
+const CHUNK = 64                                                     // quads per mesh (~2.5 km of wall), so the province-long curtain is frustum-culled in pieces
+
 export class FlameWall {
   constructor(rings) {
     this.rings = rings.map((flat) => { const pts = []; for (let i = 0; i + 1 < flat.length; i += 2) pts.push([flat[i], flat[i + 1]]); return pts })
-    this.mesh = new THREE.Mesh(this.geometry(), material)
-    this.mesh.frustumCulled = false
-    this.mesh.renderOrder = 10
+    this.mesh = new THREE.Group()
+    for (const g of this.geometries()) { const m = new THREE.Mesh(g, material); m.renderOrder = 10; this.mesh.add(m) }
   }
 
-  geometry() {
-    const pos = [], uv = []
-    let along = 0
+  geometries() {
+    const out = []
+    let pos = [], uv = [], quads = 0, along = 0
+    const flush = () => {
+      if (!pos.length) return
+      const g = new THREE.BufferGeometry()
+      g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+      g.setAttribute("wallUv", new THREE.Float32BufferAttribute(uv, 2))
+      g.computeBoundingSphere()
+      out.push(g); pos = []; uv = []; quads = 0
+    }
     for (const ring of this.rings) {
       for (let i = 0; i < ring.length; i++) {
         const [ax, az] = ring[i], [bx, bz] = ring[(i + 1) % ring.length]
@@ -55,13 +64,12 @@ export class FlameWall {
           // two triangles per segment
           pos.push(x0, BOTTOM, z0, x1, BOTTOM, z1, x1, BOTTOM + HEIGHT, z1, x0, BOTTOM, z0, x1, BOTTOM + HEIGHT, z1, x0, BOTTOM + HEIGHT, z0)
           uv.push(u0, 0, u1, 0, u1, 1, u0, 0, u1, 1, u0, 1)
+          if (++quads >= CHUNK) flush()
         }
       }
     }
-    const g = new THREE.BufferGeometry()
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
-    g.setAttribute("wallUv", new THREE.Float32BufferAttribute(uv, 2))
-    return g
+    flush()
+    return out
   }
 
   update(t) { material.uniforms.time.value = t }
