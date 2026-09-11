@@ -1,10 +1,11 @@
 import * as THREE from "three"
 
-// A full day every 6 minutes, on the wall clock so every player shares the same time of day. Sunrise at 06:00,
-// noon at 12:00, sunset at 18:00 game time. The sun light swings east → south → west and fades out; the sky,
+// A full day every 6 minutes, on the wall clock so every player shares the same time of day. Sunrise at 04:30,
+// solar noon at 13:00, sunset at 21:30 game time. The sun light swings east → south → west and fades out; the sky,
 // fog and hemisphere light darken to a moonlit blue; `darkness` (0 day … 1 night) drives street lamps, headlights
-// and sign reflectivity. ?time=21.5 in the URL freezes the clock at that hour (handy for looking at the night).
+// and sign reflectivity. ?time=23 in the URL freezes the clock at that hour (handy for looking at the night).
 export const DAY_SECONDS = 360
+export const SUNRISE = 4.5, SUNSET = 21.5
 const SKY_DISTANCE = 3200                                    // inside the camera's far plane, beyond the loaded tiles
 
 const DAY_SKY = new THREE.Color(0x9fb8cf), DUSK_SKY = new THREE.Color(0xe39a6c), NIGHT_SKY = new THREE.Color(0x0a0f1d)
@@ -58,9 +59,9 @@ export class DayNight {
   // returns darkness 0..1
   update() {
     const w = this.world
-    const a = (this.hours() - 6) / 24 * Math.PI * 2          // 0 at sunrise, π/2 at noon, π at sunset
+    const a = sunAngle(this.hours())
     const elev = Math.sin(a)                                  // sun elevation, -1..1
-    const daylight = smoothstep(-0.22, 0.30, elev)             // twilight lingers ~40 game minutes after sunset
+    const daylight = smoothstep(-0.22, 0.30, elev)             // twilight lingers ~30 game minutes after sunset
     const dusk = (1 - smoothstep(0, 0.35, Math.abs(elev))) * smoothstep(-0.35, -0.05, elev)   // warm glow around the horizon
 
     this._sky.copy(NIGHT_SKY).lerp(DAY_SKY, daylight).lerp(DUSK_SKY, dusk * 0.5)
@@ -161,6 +162,13 @@ function discTexture(kind) {
   }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace
   return t
+}
+
+// 0 at sunrise, π/2 at solar noon, π at sunset, 2π at the next sunrise: the daylight hours are stretched over the
+// upper half of the circle and the night hours squeezed into the lower half
+function sunAngle(hours) {
+  const t = (hours - SUNRISE + 24) % 24, day = SUNSET - SUNRISE
+  return t < day ? t / day * Math.PI : Math.PI + (t - day) / (24 - day) * Math.PI
 }
 
 function smoothstep(a, b, x) { const t = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t) }
