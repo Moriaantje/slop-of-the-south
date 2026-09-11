@@ -52,6 +52,14 @@ export class Post {
     this.ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 4, rings: 2, samples: 12 })
     this.ao.blendIntensity = T.look.post.ao
     this.composer.addPass(this.ao)
+    // The AO pass draws depth and normals with an override material that knows nothing of alpha: every sprite, leaf
+    // card, grass tuft and label would occlude as a solid quad and wear a dark box. Everything cut out or transparent
+    // lives on layer 1, which the main camera and the shadow camera see and the AO pre-pass does not.
+    world.camera.layers.enable(1)
+    world.sun.shadow.camera.layers.enable(1)
+    const aoRender = this.ao.render.bind(this.ao)
+    this.ao.render = (...args) => { world.camera.layers.disable(1); aoRender(...args); world.camera.layers.enable(1) }
+    this.frame = 0
     this.bloom = new UnrealBloomPass(size, T.look.post.bloom, 0.55, 0.9)
     this.composer.addPass(this.bloom)
     this.grade = new ShaderPass(GRADE)
@@ -68,8 +76,18 @@ export class Post {
   }
 
   // darkness 0..1: bloom bites harder at night (lit windows, fire), the AO a little less
+  // new objects arrive all the time (tiles, effects): sort them onto the alpha layer once a second
+  classify() {
+    this.world.scene.traverse((o) => {
+      if (o.layers.mask !== 1) return
+      const m = o.material
+      if (o.isSprite || (m && (m.alphaTest > 0 || m.transparent))) o.layers.set(1)
+    })
+  }
+
   render(darkness = 0) {
     if (!this.enabled) { this.world.render(); return }
+    if (this.frame++ % 30 === 0) this.classify()
     const P = T.look.post
     this.ao.blendIntensity = P.ao
     this.bloom.strength = P.bloom * (1 + 0.8 * darkness)
