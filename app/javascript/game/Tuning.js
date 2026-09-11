@@ -42,9 +42,9 @@ export const TUNING = {
     overspeedBleed: 2,     // /s: speed above the current cap bleeds off instead of snapping
   },
   camera: {
-    dist: 8.5, distPerSpeed: 2.5, distBoost: 1.2,
-    height: 3.4, heightPerSpeed: 0.8,
-    lookAhead: 3.0, lookHeight: 1.6,
+    dist: 8.0, distPerSpeed: 2.5, distBoost: 1.2,
+    height: 2.6, heightPerSpeed: 1.0,        // lower and closer at rest: streets framed at eye height, rising with speed
+    lookAhead: 4.0, lookHeight: 1.5,
     posSmooth: 0.18, lookSmooth: 0.08, yawSmooth: 0.22,
     velBlend: 0.6, velBlendDrift: 0.85,             // how much the camera sits behind the velocity rather than the nose
     velBlendMinSpeed: 3, velBlendFullSpeed: 11,

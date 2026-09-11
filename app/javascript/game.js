@@ -13,6 +13,7 @@ import { Quests } from "game/Quests"
 import { Clouds } from "game/Clouds"
 import { Post } from "game/Post"
 import { Grass, GRASS_UNIFORMS } from "game/Grass"
+import { Props } from "game/Props"
 import { TREE_UNIFORMS } from "game/Trees"
 import { flag } from "game/Flags"
 import { textureStats } from "game/Textures"
@@ -120,6 +121,7 @@ async function main() {
   let dragons = null
   // the people at the hubs and the quests they hand out
   const npcs = new Npcs({ scene: world.scene, assets, hubs, heightAt: (x, z) => chunks.heightAt(x, z) })
+  const props = new Props({ scene: world.scene, assets, hubs, heightAt: (x, z) => chunks.heightAt(x, z) })
   let quests = null
   // the session: who you are in the world, and what the server decides about you
   const session = new Session(playerId, { actie: el("actie"), banner: el("banner"), bannerTitel: el("banner-titel"), bannerSub: el("banner-sub"), flits: el("flits"), status: el("status") }, {
@@ -278,6 +280,7 @@ async function main() {
     remotes.update(car, world.camera)
     dragons.update(car, world.camera, dt, darkness)
     npcs.update(car, world.camera, dt, darkness)
+    props.update(car)
     quests.update(car, world.camera, dt)
     const prompt = quests.open ? null : npcs.prompt
     if (prompt !== lastPrompt) { lastPrompt = prompt; promptEl.hidden = !prompt; promptEl.textContent = prompt ?? "" }

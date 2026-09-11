@@ -16,6 +16,21 @@ export const MODELS = {
   npc_a:  { file: "npc_a.glb",  height: 1.75, forward: Math.PI, color: 0x7a6a4f },
   npc_b:  { file: "npc_b.glb",  height: 1.75, forward: Math.PI, color: 0x5f7a4f },
   npc_c:  { file: "npc_c.glb",  height: 1.75, forward: Math.PI, color: 0x7a4f5f },
+  // the town props (Props.js): CC0 kit pieces under public/models/props, sized in metres; a missing file draws nothing
+  well:     { file: "props/well.glb",     height: 2.6, forward: 0, prop: true },
+  stall:    { file: "props/stall.glb",    height: 3.0, forward: 0, prop: true },
+  barrel:   { file: "props/barrel.glb",   height: 0.9, forward: 0, prop: true },
+  crate:    { file: "props/crate.glb",    height: 0.8, forward: 0, prop: true },
+  lantern:  { file: "props/lantern.glb",  height: 3.4, forward: 0, prop: true },
+  bench:    { file: "props/bench.glb",    height: 0.9, forward: 0, prop: true },
+  fence:    { file: "props/fence.glb",    height: 1.1, forward: 0, prop: true },
+  planter:  { file: "props/planter.glb",  height: 0.7, forward: 0, prop: true },
+  cart:     { file: "props/cart.glb",     height: 1.7, forward: 0, prop: true },
+  sign:     { file: "props/sign.glb",     height: 2.3, forward: 0, prop: true },
+  hay:      { file: "props/hay.glb",      height: 1.2, forward: 0, prop: true },
+  bush:     { file: "props/bush.glb",     height: 1.1, forward: 0, prop: true },
+  fountain: { file: "props/fountain.glb", height: 3.2, forward: 0, prop: true },
+  wall:     { file: "props/wall.glb",     height: 1.2, forward: 0, prop: true },
 }
 
 export class Assets {
@@ -33,7 +48,7 @@ export class Assets {
     if (!spec) throw new Error(`unknown model ${name}`)
     const p = this.loader.loadAsync(versioned(`/models/${spec.file}`))
       .then((gltf) => normalise(gltf, spec))
-      .catch((err) => { console.warn(`models/${spec.file}: ${err.message ?? err}`); return placeholder(spec) })
+      .catch((err) => { console.warn(`models/${spec.file}: ${err.message ?? err}`); return spec.prop ? nothing(spec) : placeholder(spec) })
     this.models.set(name, p)
     return p
   }
@@ -60,11 +75,12 @@ export class Assets {
       update(dt) { this.mixer?.update(dt) },
       dispose() { this.mixer?.stopAllAction(); this.root.clear() },
     }
-    const box = standIn(spec)
-    inst.root.add(box)
+    const box = spec.prop ? null : standIn(spec)
+    if (box) inst.root.add(box)
     this.load(name).then((model) => {
-      const copy = model.placeholder ? model.root.clone() : skeletonClone(model.root)
-      inst.root.remove(box)
+      if (model.missing) { inst.ready = true; onReady?.(inst); return }
+      const copy = model.placeholder || spec.prop ? model.root.clone() : skeletonClone(model.root)
+      if (box) inst.root.remove(box)
       inst.root.add(copy)
       inst.clips = model.clips
       inst.mixer = new THREE.AnimationMixer(copy)
@@ -117,6 +133,11 @@ function standIn(spec) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(h * 0.4, h, h * 0.6), new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.8 }))
   m.position.y = h / 2
   return m
+}
+
+// a prop whose file is not there draws nothing at all
+function nothing(spec) {
+  return { root: new THREE.Group(), clips: [], size: new THREE.Vector3(), placeholder: true, missing: true }
 }
 
 function placeholder(spec) {
