@@ -11,17 +11,18 @@ class TileBuilder
     x0, y0 = tx * s, ty * s
     meshes = meshes_for(tx, ty)
     network = RoadBuilder.new(@heights).build(tx, ty)   # smoothed, pinned road profiles + terrain deformation
+    water = water_beds(tx, ty, x0, y0 + s)              # surface levels and carved beds of the bigger water bodies
     {
       tx: tx, ty: ty,
       origin: World.to_game(x0, y0 + s),      # game-space corner (west, north)
-      heights: heights_for(x0, y0, network[:deform]),
+      heights: heights_for(x0, y0, network[:deform], water[:bed]),
       roads: network[:roads],
       junctions: network[:junctions],
       buildings: buildings_for(tx, ty, skip: meshes.map { _1[:id] }.to_set),
       meshes: meshes,
       trees: trees_for(tx, ty),
       furniture: FurnitureBuilder.new.build(tx, ty),
-      cover: cover_for(tx, ty, x0, y0 + s),
+      cover: cover_for(tx, ty, x0, y0 + s, water[:levels]),
       biome: LandCover.biome(LandCover.shares_in_tile(tx, ty))
     }
   end
@@ -30,7 +31,8 @@ class TileBuilder
 
   # Flat array, HEIGHT_N × HEIGHT_N, rows north→south, columns west→east.
   # `deform` (from RoadBuilder) seats the terrain under and beside roads.
-  def heights_for(x0, y0, deform = nil)
+  # `bed` ({ [row, col] => height }) lowers samples inside water bodies to their carved bed.
+  def heights_for(x0, y0, deform = nil, bed = {})
     n, step, s = World::HEIGHT_N, World::HEIGHT_STEP, World::TILE_SIZE
     out = Array.new(n * n)
     n.times do |row|
@@ -39,6 +41,8 @@ class TileBuilder
         x = x0 + col * step
         h = @heights.sample(x, y)
         h = deform.call(x, y, h) if deform
+        b = bed[[ row, col ]]
+        h = b if b && b < h
         out[row * n + col] = h.round(2)
       end
     end
@@ -111,14 +115,54 @@ class TileBuilder
 
   # Land cover polygons clipped to the tile: [code, outer_ring, hole_ring, ...] with rings as flat decimetre
   # offsets [dx, dz, ...] from the tile origin (west, north), so 0..5000 across the tile. Painted onto the terrain.
-  def cover_for(tx, ty, x0, y1)
-    LandCover.in_tile(tx, ty).flat_map do |code, polys|
+  # Water entries carry their surface level (metres NAP, or null for water draped on the terrain) before the rings:
+  # [30, level, outer_ring, hole_ring, ...].
+  def cover_for(tx, ty, x0, y1, levels = {})
+    LandCover.in_tile(tx, ty).flat_map do |code, polys, water|
       polys.filter_map do |rings|
         rings = rings.map { |ring| ring_dm(ring, x0, y1) }.reject { _1.size < 6 }
         next if rings.empty?
-        [ code, *rings ]
+        water ? [ code, levels[water[:id]]&.round(2), *rings ] : [ code, *rings ]
       end
     end
+  end
+
+  # The AHN height inside water is the water surface, so lakes, rivers and canals get a bed carved below it:
+  # depth grows with the distance from the shore (LandCover::BANK_SLOPE) up to the kind's depth. Each flat water body's
+  # level is the median terrain height of the grid samples inside it (or the height at a point on it when none fall in).
+  # Returns { bed: { [row, col] => bed height }, levels: { land_cover id => level } }.
+  def water_beds(tx, ty, x0, y1)
+    n, step = World::HEIGHT_N, World::HEIGHT_STEP
+    env = Road.tile_envelope_sql(tx, ty)
+    rows = ActiveRecord::Base.connection.select_rows(<<~SQL)
+      WITH w AS (
+        SELECT id, kind, geom, ST_Boundary(geom) AS b, ST_X(ST_PointOnSurface(geom)) AS px, ST_Y(ST_PointOnSurface(geom)) AS py
+        FROM land_covers WHERE #{LandCover::FLAT_WATER_SQL} AND geom && #{env} AND ST_Intersects(geom, #{env})
+      ),
+      pts AS (
+        SELECT r AS row, c AS col, ST_SetSRID(ST_MakePoint(#{x0} + c * #{step}, #{y1} - r * #{step}), 28992) AS p
+        FROM generate_series(0, #{n - 1}) AS r, generate_series(0, #{n - 1}) AS c
+      )
+      SELECT w.id, w.kind, w.px, w.py, pts.row, pts.col, ST_Distance(pts.p, w.b)
+      FROM w LEFT JOIN pts ON ST_Intersects(w.geom, pts.p)
+    SQL
+    return { bed: {}, levels: {} } if rows.empty?
+    by_water = rows.group_by(&:first)
+    levels, bed = {}, {}
+    by_water.each do |id, list|
+      kind, px, py = list.first[1], list.first[2].to_f, list.first[3].to_f
+      inside = list.select { _1[4] }
+      samples = inside.map { |_, _, _, _, row, col| @heights.sample(x0 + col.to_i * step, y1 - row.to_i * step) }.sort
+      level = samples.empty? ? @heights.sample(px, py) : samples[samples.size / 2]
+      levels[id] = level
+      max_depth = LandCover::DEPTH.fetch(kind, 3.0)
+      inside.each do |_, _, _, _, row, col, dist|
+        depth = [ dist.to_f * LandCover::BANK_SLOPE, max_depth ].min
+        key = [ row.to_i, col.to_i ]
+        bed[key] = [ bed[key], level - depth ].compact.min
+      end
+    end
+    { bed: bed, levels: levels }
   end
 
   def ring_dm(ring, x0, y1)

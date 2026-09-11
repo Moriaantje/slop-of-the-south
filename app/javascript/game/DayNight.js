@@ -22,6 +22,7 @@ export class DayNight {
     const fixed = Number(new URLSearchParams(location.search).get("time"))
     this.fixedHours = Number.isFinite(fixed) && location.search.includes("time=") ? ((fixed % 24) + 24) % 24 : null
     this.darkness = 0
+    this.env = { darkness: 0, sunDir: new THREE.Vector3(0, 1, 0), sunColor: new THREE.Color(), zenith: new THREE.Color(), horizon: new THREE.Color() }
     this._sky = new THREE.Color()
     this._c = new THREE.Color()
     this._dir = new THREE.Vector3()
@@ -101,6 +102,10 @@ export class DayNight {
     w.renderer.toneMappingExposure = 1 + 0.35 * (1 - daylight)
 
     this.darkness = 1 - daylight
+    this.env.darkness = this.darkness
+    this.env.sunDir.copy(w.sun.position).normalize()
+    this.env.sunColor.copy(w.sun.color).multiplyScalar(w.sun.intensity)
+    this.env.zenith.copy(u.zenith.value); this.env.horizon.copy(u.horizon.value)
     return this.darkness
   }
 }

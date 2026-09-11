@@ -13,6 +13,13 @@ class LandCover < ApplicationRecord
   # paint order: base vegetation first, then hard surfaces, water on top
   ORDER = ->(code) { code >= 30 ? 2 : (code >= 20 ? 1 : 0) }
 
+  # Water that gets a flat surface at its own level and a hollowed bed: lakes, harbours, rivers, canals and the wider
+  # watercourses (the Maas is a "waterloop"). Ditches and brooks stay draped on the terrain.
+  FLAT_WATER_SQL = "(layer = 'water' AND (kind IN ('watervlakte', 'meer, plas, ven, vijver', 'rivier', 'kanaal', 'haven', 'gracht', 'zee') OR (kind = 'waterloop' AND ST_Area(geom) > 3000)))"
+  # how deep the bed goes (metres) — the AHN height inside water is the surface, so the bed has to be carved
+  DEPTH = { "rivier" => 6.0, "kanaal" => 5.0, "haven" => 5.0, "zee" => 6.0, "waterloop" => 4.0, "watervlakte" => 3.0, "meer, plas, ven, vijver" => 3.0, "gracht" => 2.5 }.freeze
+  BANK_SLOPE = 0.6      # metres of depth per metre from the shore
+
   validates :source_id, :kind, :geom, presence: true
   validates :layer, inclusion: { in: LAYERS }
 
@@ -20,17 +27,17 @@ class LandCover < ApplicationRecord
   def self.in_tile(tx, ty)
     env = Road.tile_envelope_sql(tx, ty)
     rows = connection.select_rows(<<~SQL)
-      SELECT layer, kind,
+      SELECT layer, kind, id, #{FLAT_WATER_SQL},
              ST_AsGeoJSON(ST_Multi(ST_CollectionExtract(ST_SimplifyPreserveTopology(ST_Intersection(geom, #{env}), 0.4), 3)), 1)
       FROM land_covers
       WHERE geom && #{env} AND ST_Intersects(geom, #{env})
     SQL
-    rows.filter_map do |layer, kind, geojson|
+    rows.filter_map do |layer, kind, id, flat, geojson|
       code = CODES[layer == "water" ? "water" : kind]
       next unless code && geojson
       polys = JSON.parse(geojson)["coordinates"]
       next if polys.blank?
-      [ code, polys ]
+      [ code, polys, layer == "water" ? { id: id, kind: kind, flat: flat } : nil ]
     end.sort_by { |code, _| [ ORDER.call(code), code ] }
   end
 

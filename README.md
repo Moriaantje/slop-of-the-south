@@ -71,10 +71,20 @@ in the game's about screen.
                                             ├── meshes[]         {id, roof, o, f: [[label, ring…]…]} (3D BAG LoD2.2 faces, cm offsets)
                                             ├── trees[]          [x, z, kind, height]   (BGT; kind 0 street tree, 1 broadleaf wood, 2 conifer, 3 fruit tree)
                                             ├── cover[]          [code, ring…]          (BGT land cover, dm offsets from the tile corner; painted)
+                                            │                    water: [30, level | null, ring…] — level = flat surface over a carved bed
                                             ├── furniture        {lamps: [x, z, dir, h], signals: [x, z, face, group], signs: [x, z, face, code, black?, text?]}
                                             └── biome            "akkerland" | "woonwijk" | …
 
 Tiles are static JSON served by nginx/Rails' static file server — no DB hit while playing.
+
+### 1.4 b Water
+
+The AHN height inside water is the water *surface*, so the tile builder carves a bed under lakes, harbours, rivers,
+canals and the wider watercourses (`TileBuilder#water_beds`): depth grows with the distance from the shore
+(0.6 m per metre) up to a per-kind depth (Maas/rivier 6 m, kanaal 5 m, lakes 3 m). Each such water body gets a flat
+surface at its own level (median terrain height inside it) drawn by a water shader (`game/Cover.js`): rippling
+normals, the sky reflected by Fresnel (colours from DayNight), sun glitter, and transparency over the dark-painted bed.
+Ditches and brooks stay draped on the terrain. Drive in and you sink.
 
 ### 1.4a Time of day
 

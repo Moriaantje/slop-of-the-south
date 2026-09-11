@@ -4,6 +4,7 @@ import { ChunkManager } from "game/ChunkManager"
 import { updateSignals, setNightLevel } from "game/Furniture"
 import { setSignsNight } from "game/Signs"
 import { DayNight } from "game/DayNight"
+import { updateWater } from "game/Cover"
 import { Vehicle } from "game/Vehicle"
 import { Input } from "game/Input"
 import { Network } from "game/Network"
@@ -66,6 +67,7 @@ async function main() {
     updateSignals()
     const darkness = dayNight.update()
     car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)
+    updateWater(dayNight.env, timer.getElapsed())
     if (input.toggleMap) minimap.toggle()
     if (chunks.ready(car.x, car.z)) {
       if (input.reset) { car.reset(config.spawn); placed = false }
