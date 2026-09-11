@@ -32,6 +32,7 @@ async function main() {
   const remotes = new RemoteCars(world.scene)
   const dayNight = new DayNight(world)
   const clockEl = document.getElementById("clock")
+  window.slop = { world, dayNight, car }              // for poking at the scene from the console
   const net     = new Network({ room: "main", playerId, onMessage: (m) => remotes.receive(m) })
   const locator = new Locator(config.places)
   const minimap = new Minimap(document.getElementById("minimap"), config, {
