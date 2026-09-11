@@ -90,8 +90,8 @@ export const TUNING = {
     aimCone: 0.44, aimRange: 300,    // auto-aim: a dragon within this angle and range is the target
   },
   look: {
-    exposure: 1.05,        // tone mapping exposure by day (the night adds up to +35 %)
-    sun: 2.4,              // the sun's intensity at noon: strong, so lit and shadowed sides differ
+    exposure: 0.95,        // tone mapping exposure by day (the night adds up to +35 %)
+    sun: 1.7,              // the sun's intensity at noon: strong enough that lit and shadowed sides differ
     envIntensity: 0.35,    // how much the sky environment map lights standard materials
     hemi: 0.5,             // hemisphere light scale once the environment map supplies ambient (1 without it)
     orthoSat: 1.1, orthoGain: 0.9,   // saturation and gain of the aerial photo on the terrain
@@ -99,7 +99,7 @@ export const TUNING = {
     windows: { lit: 0.35, glow: 1.4 }, // share of windows lit at night, and how bright
     shadows: { size: 2048, radius: 170 },   // the sun's shadow map: texels, and metres around the player it covers
     post: { ao: 0.9, bloom: 0.28, bloomThreshold: 0.85, contrast: 1.08, saturation: 1.12, warm: 0.06, vignette: 0.28, sharpen: 0.6, grain: 0.018 },   // Post.js
-    shafts: 0.5,           // sun shafts through the fog when you look towards the sun
+    shafts: 0.25,          // sun shafts through the fog when you look towards the sun
     mist: 0.7,             // ground mist in the low places at dawn and dusk
   },
 }

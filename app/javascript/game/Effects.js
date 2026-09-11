@@ -94,6 +94,7 @@ export class Effects {
   // once per frame, after the camera has moved
   update(dt, camera) {
     this.smoke.update(dt)
+    this.fire.update(dt)
     for (let i = this.live.length - 1; i >= 0; i--) {
       const e = this.live[i]
       e.t += dt

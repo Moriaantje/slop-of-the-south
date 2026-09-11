@@ -13,6 +13,7 @@ import { Quests } from "game/Quests"
 import { Clouds } from "game/Clouds"
 import { Post } from "game/Post"
 import { Atmosphere } from "game/Atmosphere"
+import { Quality } from "game/Quality"
 import { Grass, GRASS_UNIFORMS } from "game/Grass"
 import { Props } from "game/Props"
 import { Scatter } from "game/Scatter"
@@ -79,6 +80,7 @@ async function main() {
   const clouds  = new Clouds(world.scene)
   const post    = new Post(world)                             // ambient occlusion, bloom, grade (?post=0 for the bare renderer)
   const air     = new Atmosphere(world)                       // sun shafts and valley mist
+  const quality = new Quality(world, post)                    // holds the frame time by scaling what it costs (?q=0..3)
   const grass   = new Grass(world.scene, (x, z) => chunks.heightAt(x, z))
   // ?debug=1: a corner readout of what the renderer is doing, with any shader compile errors (paste it when it looks wrong)
   const debugEl = el("debug"), shaderErrors = []
@@ -87,7 +89,7 @@ async function main() {
     const log = gl.getProgramInfoLog(program) + " | " + gl.getShaderInfoLog(vs) + " | " + gl.getShaderInfoLog(fs)
     shaderErrors.push(log.slice(0, 300)); console.error("shader:", log)
   }
-  let frames = 0, fps = 0, fpsT = performance.now()
+  let frames = 0, fps = 0, fpsT = performance.now(), lastFrameAt = performance.now()
   world.renderer.info.autoReset = false                       // the readout sums every pass of the frame
   const shadow  = new Blob(world.scene)                      // the contact shadow under the player
   const loading = new LoadingScreen(el("laden"))
@@ -168,7 +170,7 @@ async function main() {
   spells.targets = (x, z, yaw) => dragons.nearest(x, z, yaw)
   spells.onStrike = (target, kind) => dragons.struck(target, kind)
   combat.onStrike = (target, kind) => dragons.struck(target, kind)
-  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, player, spells, dragons, npcs, quests, scatter, props, grass, air, post, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
+  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, player, spells, dragons, npcs, quests, scatter, props, grass, air, post, quality, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
@@ -220,6 +222,7 @@ async function main() {
     const dt = Math.min(timer.getDelta(), 1 / 20)
 
     world.renderer.info.reset()
+    quality.update(now - lastFrameAt); lastFrameAt = now
     chunks.update(car.x, car.z)
     updateSignals()
     // the sun's shadow map is centred a little ahead of the player, stepped in 4 m so the shadows do not swim
@@ -316,7 +319,8 @@ async function main() {
         const info = world.renderer.info, gl = world.renderer.getContext(), dbg = gl.getExtension("WEBGL_debug_renderer_info")
         debugEl.textContent = [
           `${fps} fps · ${info.render.calls} calls · ${(info.render.triangles / 1e6).toFixed(2)} M tris · ${info.memory.textures} textures · ${info.programs?.length ?? "?"} programs`,
-          `gpu ${dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "?"} · shadows ${world.shadows ? "on" : "off"} · post ${post.enabled ? "on" : "off"} · grass ${grass.layers.size} tiles · ${navigator.userAgent.split(") ").pop()}`,
+          `gpu ${dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "?"} · ${navigator.userAgent.split(") ").pop()}`,
+          `quality ${quality.name} (${quality.level}) · scale ${world.renderer.getPixelRatio().toFixed(2)} · post ${post.enabled ? "on" : "off"} · ao ${post.ao?.enabled ? "on" : "off"} · shadows ${world.shadows ? world.sun.shadow.mapSize.x : "off"}/${quality.shadowEvery}f · grass ${grass.layers.size} tiles`,
           `textures ok ${textureStats.ok} failed ${textureStats.failed} ${textureStats.last}`,
           `ortho ${chunks.ortho.enabled ? `ready ${chunks.ortho.stats.ready} loads ${chunks.ortho.stats.loads} failed ${chunks.ortho.stats.failed}` : "off"} · tiles ${chunks.tiles.size}`,
           ...(shaderErrors.length ? [`SHADER ERRORS (${shaderErrors.length}): ${shaderErrors[shaderErrors.length - 1]}`] : []),

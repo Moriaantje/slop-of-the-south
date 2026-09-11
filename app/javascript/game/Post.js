@@ -15,10 +15,9 @@ import { TUNING as T } from "game/Tuning"
 // contrast-adaptive sharpening (AMD FidelityFX CAS, 2019: a 3×3 cross that sharpens flat areas more than busy ones,
 // the single cheapest way to make a game read as crisp), filmic contrast, a little saturation, warm highlights
 // against cool shadows, a vignette and a whisper of film grain to break up banding; the output pass does
-// ACES and sRGB last, then SMAA (Jimenez et al. 2012) to clean the remaining edges. Rendered at device ratio 1 into
-// a 4× multisampled target — post costs fill rate per pixel, and MSAA plus SMAA give the edges back for a fraction
-// of what a 1.5× buffer costs; the AO works at half resolution and is upsampled in the blend. ?post=0 falls back to
-// the plain renderer.
+// ACES and sRGB last, then SMAA (Jimenez et al. 2012) to clean the remaining edges. Everything runs in a 2×
+// multisampled half-float target at whatever resolution Quality.js currently allows (the passes cost fill rate, so
+// the resolution is the lever), and the AO at a fraction of that again. ?post=0 falls back to the plain renderer.
 const GRADE = {
   uniforms: { tDiffuse: { value: null }, uContrast: { value: 1.08 }, uSaturation: { value: 1.12 }, uWarm: { value: 0.06 }, uVignette: { value: 0.28 },
               uLift: { value: 0.0 }, uSharpen: { value: 0.5 }, uGrain: { value: 0.02 }, uTime: { value: 0 }, uTexel: { value: new THREE.Vector2() } },
@@ -62,14 +61,14 @@ export class Post {
     this.world = world
     if (!this.enabled) return
     const r = world.renderer
-    r.setPixelRatio(1)
     const size = r.getDrawingBufferSize(new THREE.Vector2())
-    const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 })
+    const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 2 })
     this.composer = new EffectComposer(r, target)
     this.composer.addPass(new RenderPass(world.scene, world.camera))
     this.ao = new GTAOPass(world.scene, world.camera, Math.round(size.x / 2), Math.round(size.y / 2))
     this.ao.output = GTAOPass.OUTPUT.Default
     Object.assign(this.ao.gtaoMaterial.uniforms, {})
+    this.aoFraction = 0.5
     this.ao.updateGtaoMaterial({ radius: 2.2, distanceExponent: 1.5, thickness: 1.0, distanceFallOff: 1.0, scale: 1.4, samples: 8, screenSpaceRadius: false })
     this.ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 4, rings: 1, samples: 8 })
     this.ao.blendIntensity = T.look.post.ao
@@ -97,8 +96,20 @@ export class Post {
     if (!this.enabled) return
     const size = this.world.renderer.getDrawingBufferSize(new THREE.Vector2())
     this.composer.setSize(size.x, size.y)
-    this.ao.setSize(Math.round(size.x / 2), Math.round(size.y / 2))
+    const f = this.aoFraction || 0.5
+    this.ao.setSize(Math.max(64, Math.round(size.x * f)), Math.max(64, Math.round(size.y * f)))
     this.grade.uniforms.uTexel.value.set(1 / size.x, 1 / size.y)
+  }
+
+  // Quality.js decides what the frame may cost: the AO's fraction and sample count, the bloom pyramid's size
+  setQuality(L) {
+    if (!this.enabled) return
+    this.ao.enabled = L.ao > 0
+    this.aoFraction = L.ao || 0.5
+    if (L.ao > 0) this.ao.updateGtaoMaterial({ samples: L.aoSamples })
+    const size = this.world.renderer.getDrawingBufferSize(new THREE.Vector2())
+    this.bloom.setSize(Math.max(16, Math.round(size.x * L.bloom)), Math.max(16, Math.round(size.y * L.bloom)))
+    this.resize()
   }
 
   // darkness 0..1: bloom bites harder at night (lit windows, fire), the AO a little less

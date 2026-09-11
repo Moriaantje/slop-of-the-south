@@ -14,6 +14,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js"
 export const ROAD_LIFT = 0.05
 export const CURB = 0.12
 const LIFT = ROAD_LIFT, TEX_LEN = 24, SIDEWALK = 1.7
+const EDGE_RISE = 0.45        // how far a ribbon edge may climb above the road centre before it would be a fin on the bank
 const URBAN = new Set(["stad", "woonwijk", "dorp"])
 
 // Surfaces are photo materials (ambientCG, CC0; game/Textures.pbr) with UVs in metres: u across the ribbon, v along
@@ -94,7 +95,7 @@ export function buildRoads(roads, junctions, biome, terrainAt = null) {
     }
   }
   for (const [x, z, y, r] of junctions ?? []) {
-    const g = new THREE.CircleGeometry(r, 16).toNonIndexed()
+    const g = new THREE.CircleGeometry(r * 1.06 + 0.35, 20).toNonIndexed()      // overlap the ribbons: no seam at the mouth
     g.rotateX(-Math.PI / 2); g.translate(x, 0, z)
     const pos = g.attributes.position                            // level with the ribbons, riding up over any terrain that pokes through
     for (let i = 0; i < pos.count; i++) pos.setY(i, Math.max(y, terrainAt ? terrainAt(pos.getX(i), pos.getZ(i)) : y) + LIFT + 0.01)
@@ -146,8 +147,10 @@ export function ribbon(pts, hw, lift, uvMode = "metres", offset = 0, bottom = nu
     if (i > 0) along += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])   // pts are [x, z, y]
     const [lxp, lzp, rxp, rzp, cx, cz] = edges[i]
     if (bottom === null) {
-      const yl = ground ? Math.max(y + lift, floor(i, 0) + LIFT) : y + lift
-      const yr = ground ? Math.max(y + lift, floor(i, 2) + LIFT) : y + lift
+      // the edge follows the ground so the terrain never pokes through, but only so far: across a valley bank the
+      // ground beside the road is metres higher, and an unclamped edge would stand up as a wall along the ribbon
+      const yl = ground ? Math.min(y + lift + EDGE_RISE, Math.max(y + lift, floor(i, 0) + LIFT)) : y + lift
+      const yr = ground ? Math.min(y + lift + EDGE_RISE, Math.max(y + lift, floor(i, 2) + LIFT)) : y + lift
       verts.push(lxp, yl, lzp, rxp, yr, rzp)
     } else {
       verts.push(cx, y + bottom, cz, cx, y + lift, cz)
