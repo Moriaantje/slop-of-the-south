@@ -12,6 +12,7 @@ import { Npcs } from "game/Npcs"
 import { Quests } from "game/Quests"
 import { Clouds } from "game/Clouds"
 import { Post } from "game/Post"
+import { Atmosphere } from "game/Atmosphere"
 import { Grass, GRASS_UNIFORMS } from "game/Grass"
 import { Props } from "game/Props"
 import { TREE_UNIFORMS } from "game/Trees"
@@ -76,6 +77,7 @@ async function main() {
   const skyEnv  = new SkyEnv(world, dayNight)               // the sky baked into an environment map for the materials
   const clouds  = new Clouds(world.scene)
   const post    = new Post(world)                             // ambient occlusion, bloom, grade (?post=0 for the bare renderer)
+  const air     = new Atmosphere(world)                       // sun shafts and valley mist
   const grass   = new Grass(world.scene, (x, z) => chunks.heightAt(x, z))
   // ?debug=1: a corner readout of what the renderer is doing, with any shader compile errors (paste it when it looks wrong)
   const debugEl = el("debug"), shaderErrors = []
@@ -222,6 +224,7 @@ async function main() {
     const darkness = dayNight.update()
     skyEnv.update(now)
     clouds.update(dt, world.camera, dayNight.env)
+    air.update(dt, world.camera, dayNight.env, car.y)
     TREE_UNIFORMS.uTime.value += dt; GRASS_UNIFORMS.uTime.value += dt
     TREE_UNIFORMS.uSunDir.value.copy(dayNight.env.sunDir)
     grass.update(chunks.tiles, ...chunks.tileIndex(car.x, car.z), car.x, car.z)

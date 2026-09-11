@@ -98,7 +98,9 @@ export const TUNING = {
     detail: 0.9, detailFar: 260,     // the close-range ground grain: strength, and the distance it has faded out by
     windows: { lit: 0.35, glow: 1.4 }, // share of windows lit at night, and how bright
     shadows: { size: 2048, radius: 170 },   // the sun's shadow map: texels, and metres around the player it covers
-    post: { ao: 0.9, bloom: 0.28, bloomThreshold: 0.85, contrast: 1.08, saturation: 1.12, warm: 0.06, vignette: 0.28 },   // Post.js
+    post: { ao: 0.9, bloom: 0.28, bloomThreshold: 0.85, contrast: 1.08, saturation: 1.12, warm: 0.06, vignette: 0.28, sharpen: 0.6, grain: 0.018 },   // Post.js
+    shafts: 0.5,           // sun shafts through the fog when you look towards the sun
+    mist: 0.7,             // ground mist in the low places at dawn and dusk
   },
 }
 

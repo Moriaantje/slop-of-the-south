@@ -1,5 +1,5 @@
 import * as THREE from "three"
-import { pbr } from "game/Textures"
+import { pbr, weathered } from "game/Textures"
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js"
 
 // Procedural roads. Tile entries carry ready-made 3D centrelines (RoadBuilder: smoothed, junction-pinned, seated in
@@ -26,12 +26,15 @@ const SURFACES = {
   klinker: { set: "klinker", color: 0x7a6459, size: 2 },
   pavers:  { set: "pavers", color: 0xa9a29a, size: 2 },
 }
+const weathering = new WeakSet()
 function surface(name) {
   const s = SURFACES[name] ?? SURFACES.asphalt
-  return pbr(s.set, { color: s.color, tint: s.tint, size: s.size, polygonOffset: true, polygonOffsetFactor: -1 })
+  const m = pbr(s.set, { color: s.color, tint: s.tint, size: s.size, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -1 })
+  if (!weathering.has(m)) { weathering.add(m); weathered(m, { wet: s.set === "asphalt" ? 0.5 : 0.3 }) }   // wet patches catch the sky
+  return m
 }
-const junctionMat = pbr("asphalt", { color: 0x3b3c40, size: 4, polygonOffset: true, polygonOffsetFactor: -3 })
-const concrete = pbr("concrete", { color: 0x9a9892, size: 3 })
+const junctionMat = weathered(pbr("asphalt", { color: 0x3b3c40, size: 4, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -3 }), { wet: 0.5 })
+const concrete = weathered(pbr("concrete", { color: 0x9a9892, size: 3 }), { wet: 0.25 })
 
 // lane markings: transparent canvas, white paint only, one texture per marking pattern
 const markTextures = {}

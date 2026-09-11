@@ -1,6 +1,6 @@
 import * as THREE from "three"
 import { foldable, scaleRange, hullXZ, buildingHp } from "game/Destructibles"
-import { pbr, pbrEnabled } from "game/Textures"
+import { pbr, pbrEnabled, weathered } from "game/Textures"
 import { LOOK } from "game/TerrainTile"
 import { TUNING as T } from "game/Tuning"
 
@@ -118,11 +118,11 @@ vec3 roomLook(vec3 r, vec2 pm, float roomW, float roomH, float depth, float seed
 export function tuneWindows() { WIN_UNIFORMS.uWinLit.value = T.look.windows.lit; WIN_UNIFORMS.uWinGlow.value = T.look.windows.glow }
 
 const MATS = {
-  brick:    windows(pbr("brick", { vertexColors: true, size: 2.2, side: THREE.DoubleSide, roughness: 0.9 })),
-  brick2:   windows(pbr("brick2", { vertexColors: true, size: 2.4, side: THREE.DoubleSide, roughness: 0.9 })),
-  plaster:  windows(pbr("plaster", { vertexColors: true, size: 3, side: THREE.DoubleSide, roughness: 0.9 })),
-  rooftile: pbr("rooftile", { vertexColors: true, size: 1.6, side: THREE.DoubleSide, roughness: 0.85 }),
-  flat:     pbr("concrete", { vertexColors: true, size: 3, side: THREE.DoubleSide, roughness: 0.95 }),
+  brick:    weathered(windows(pbr("brick", { vertexColors: true, size: 2.2, side: THREE.DoubleSide, roughness: 0.9 })), { walls: true, wet: 0.15 }),
+  brick2:   weathered(windows(pbr("brick2", { vertexColors: true, size: 2.4, side: THREE.DoubleSide, roughness: 0.9 })), { walls: true, wet: 0.15 }),
+  plaster:  weathered(windows(pbr("plaster", { vertexColors: true, size: 3, side: THREE.DoubleSide, roughness: 0.9 })), { walls: true, wet: 0.1 }),
+  rooftile: weathered(pbr("rooftile", { vertexColors: true, size: 1.6, side: THREE.DoubleSide, roughness: 0.85 }), { wet: 0.3 }),
+  flat:     weathered(pbr("concrete", { vertexColors: true, size: 3, side: THREE.DoubleSide, roughness: 0.95 }), { wet: 0.3 }),
 }
 const WALL_SETS = ["brick", "brick", "brick2", "plaster", "brick", "plaster", "brick2", "brick"]
 

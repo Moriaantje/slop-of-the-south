@@ -12,19 +12,35 @@ import { TUNING as T } from "game/Tuning"
 // The post-processing chain, the part of the look that geometry cannot give: ground-truth ambient occlusion
 // (Jimenez et al. 2016, three's GTAOPass with its Poisson denoiser) darkens the foot of every wall, the underside of
 // every eave and the gap between things; a soft bloom lifts the sun, the lit windows and the fire; a grade pass adds
-// filmic contrast, a little saturation, warm highlights against cool shadows and a vignette; the output pass does
+// contrast-adaptive sharpening (AMD FidelityFX CAS, 2019: a 3×3 cross that sharpens flat areas more than busy ones,
+// the single cheapest way to make a game read as crisp), filmic contrast, a little saturation, warm highlights
+// against cool shadows, a vignette and a whisper of film grain to break up banding; the output pass does
 // ACES and sRGB last, then SMAA (Jimenez et al. 2012) to clean the remaining edges. Rendered at device ratio 1 into
 // a 4× multisampled target — post costs fill rate per pixel, and MSAA plus SMAA give the edges back for a fraction
 // of what a 1.5× buffer costs; the AO works at half resolution and is upsampled in the blend. ?post=0 falls back to
 // the plain renderer.
 const GRADE = {
-  uniforms: { tDiffuse: { value: null }, uContrast: { value: 1.08 }, uSaturation: { value: 1.12 }, uWarm: { value: 0.06 }, uVignette: { value: 0.28 }, uLift: { value: 0.0 } },
+  uniforms: { tDiffuse: { value: null }, uContrast: { value: 1.08 }, uSaturation: { value: 1.12 }, uWarm: { value: 0.06 }, uVignette: { value: 0.28 },
+              uLift: { value: 0.0 }, uSharpen: { value: 0.5 }, uGrain: { value: 0.02 }, uTime: { value: 0 }, uTexel: { value: new THREE.Vector2() } },
   vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */`
-    uniform sampler2D tDiffuse; uniform float uContrast, uSaturation, uWarm, uVignette, uLift;
+    uniform sampler2D tDiffuse; uniform float uContrast, uSaturation, uWarm, uVignette, uLift, uSharpen, uGrain, uTime;
+    uniform vec2 uTexel;
     varying vec2 vUv;
     void main() {
       vec3 c = texture2D(tDiffuse, vUv).rgb;                       // linear HDR
+      // contrast-adaptive sharpening: the four neighbours decide how much to sharpen, so noise and foliage are
+      // left alone while flat surfaces and edges gain definition
+      if (uSharpen > 0.0) {
+        vec3 n = texture2D(tDiffuse, vUv + vec2(0.0, -uTexel.y)).rgb;
+        vec3 s = texture2D(tDiffuse, vUv + vec2(0.0, uTexel.y)).rgb;
+        vec3 w = texture2D(tDiffuse, vUv + vec2(-uTexel.x, 0.0)).rgb;
+        vec3 e = texture2D(tDiffuse, vUv + vec2(uTexel.x, 0.0)).rgb;
+        vec3 lo = min(c, min(min(n, s), min(w, e))), hi = max(c, max(max(n, s), max(w, e)));
+        vec3 amp = sqrt(clamp(min(lo, 2.0 - hi) / max(hi, 1e-4), 0.0, 1.0));
+        vec3 wgt = -amp * uSharpen * 0.2;
+        c = clamp((c + (n + s + w + e) * wgt) / (1.0 + 4.0 * wgt), 0.0, 8.0);
+      }
       float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
       c = mix(vec3(lum), c, uSaturation);                          // saturation
       c = (c - 0.18) * uContrast + 0.18 + uLift;                   // contrast about mid grey
@@ -33,6 +49,9 @@ const GRADE = {
       c *= mix(vec3(0.97, 0.99, 1.06), vec3(1.05, 1.0, 0.94), t) * (1.0 - uWarm) + uWarm;
       vec2 d = vUv - 0.5;
       c *= 1.0 - uVignette * smoothstep(0.25, 0.9, dot(d, d) * 2.2);
+      // film grain, scaled down in the highlights: hides banding in the sky and the fog
+      float g = fract(sin(dot(vUv * 1000.0 + uTime, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+      c += g * uGrain * (1.0 - smoothstep(0.0, 1.5, lum));
       gl_FragColor = vec4(max(c, 0.0), 1.0);
     }`,
 }
@@ -66,6 +85,7 @@ export class Post {
     this.bloom = new UnrealBloomPass(size.clone().multiplyScalar(0.5), T.look.post.bloom, 0.55, 0.9)
     this.composer.addPass(this.bloom)
     this.grade = new ShaderPass(GRADE)
+    this.grade.uniforms.uTexel.value.set(1 / size.x, 1 / size.y)
     this.composer.addPass(this.grade)
     this.composer.addPass(new OutputPass())
     this.smaa = new SMAAPass()
@@ -78,6 +98,7 @@ export class Post {
     const size = this.world.renderer.getDrawingBufferSize(new THREE.Vector2())
     this.composer.setSize(size.x, size.y)
     this.ao.setSize(Math.round(size.x / 2), Math.round(size.y / 2))
+    this.grade.uniforms.uTexel.value.set(1 / size.x, 1 / size.y)
   }
 
   // darkness 0..1: bloom bites harder at night (lit windows, fire), the AO a little less
@@ -99,6 +120,7 @@ export class Post {
     this.bloom.threshold = P.bloomThreshold
     const u = this.grade.uniforms
     u.uContrast.value = P.contrast; u.uSaturation.value = P.saturation; u.uVignette.value = P.vignette; u.uWarm.value = P.warm
+    u.uSharpen.value = P.sharpen; u.uGrain.value = P.grain; u.uTime.value = performance.now() * 0.001
     this.composer.render()
   }
 }

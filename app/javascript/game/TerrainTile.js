@@ -1,5 +1,5 @@
 import * as THREE from "three"
-import { disposeTexture, loadBitmap, bitmapTexture, versioned, pbrEnabled } from "game/Textures"
+import { disposeTexture, loadBitmap, bitmapTexture, versioned, pbrEnabled, noiseTexture } from "game/Textures"
 
 // Saturation and gain applied to the aerial photo: it carries baked sunlight already, so under the scene's own sun
 // and tone mapping it washes out; a little less gain and a little more colour bring it next to the painted palette.
@@ -29,36 +29,7 @@ function requestGrass() {
 // (procedural, 256 px, made once) is multiplied in at 2.5 m repeats and its gradient bends the normal a little, so
 // the ground has grass and gravel texture that catches the light; both fade out with distance and cost a couple of
 // texture reads per fragment. Shared by the photo, the painted land cover and the plain green.
-function detailTexture() {
-  if (LOOK.uDetail.value) return LOOK.uDetail.value
-  const n = 256, c = document.createElement("canvas"); c.width = c.height = n
-  const ctx = c.getContext("2d"), img = ctx.createImageData(n, n), d = img.data
-  let s = 12345
-  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296 }
-  // value noise, three octaves, periodic so the tile wraps
-  const grid = (m) => { const g = new Float32Array(m * m); for (let i = 0; i < m * m; i++) g[i] = rnd(); return g }
-  const octaves = [[8, grid(8), 0.5], [32, grid(32), 0.3], [128, grid(128), 0.2]]
-  const sample = (g, m, x, y) => {
-    const fx = x * m, fy = y * m, x0 = Math.floor(fx) % m, y0 = Math.floor(fy) % m, x1 = (x0 + 1) % m, y1 = (y0 + 1) % m
-    const tx = fx - Math.floor(fx), ty = fy - Math.floor(fy), sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty)
-    const a = g[y0 * m + x0], b = g[y0 * m + x1], cc = g[y1 * m + x0], dd = g[y1 * m + x1]
-    return (a + (b - a) * sx) * (1 - sy) + (cc + (dd - cc) * sx) * sy
-  }
-  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-    let v = 0
-    for (const [m, g, w] of octaves) v += w * sample(g, m, x / n, y / n)
-    v = 0.5 + (v - 0.5) * 1.6 + (rnd() - 0.5) * 0.12                         // more contrast, a little grain
-    const p = (y * n + x) * 4, b = Math.max(0, Math.min(255, Math.round(v * 255)))
-    d[p] = d[p + 1] = d[p + 2] = b; d[p + 3] = 255
-  }
-  ctx.putImageData(img, 0, 0)
-  const tex = new THREE.CanvasTexture(c)
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-  tex.colorSpace = THREE.NoColorSpace
-  tex.anisotropy = 4
-  LOOK.uDetail.value = tex
-  return tex
-}
+function detailTexture() { return LOOK.uDetail.value ??= noiseTexture() }
 
 const plain = terrainMaterial(null, false)                                       // tiles without land cover
 plain.color.set(0x7fa15a)
