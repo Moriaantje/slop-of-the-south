@@ -9,6 +9,7 @@ import { buildSigns } from "game/Signs"
 import { paintCover, buildWater } from "game/Cover"
 import { ROAD_LIFT } from "game/Roads"
 import { Ortho } from "game/Ortho"
+import { waterPolys } from "game/Cover"
 
 // Streams 500 m tiles in a square around the player and disposes the ones left behind. Tile JSON is fetched in the
 // background; building the meshes is synchronous and heavy (a dense town tile is ~1 MB with 60k building vertices), so
@@ -73,6 +74,14 @@ export class ChunkManager {
   }
 
   // Height under (x, z): the road surface when on a road (blended to the terrain over the ribbon edge), else the terrain.
+  // the surface level of the water at (x, z), or null on dry land (and over water whose level is unknown)
+  waterLevelAt(x, z) {
+    const t = this.tiles.get(this.tileIndex(x, z).join("_"))
+    if (!t || t.loading || !t.water?.length) return null
+    for (const w of t.water) if (insideRing(x, z, w.ring)) return w.level
+    return null
+  }
+
   heightAt(x, z) {
     const t = this.tiles.get(this.tileIndex(x, z).join("_"))
     if (!t || t.loading) return 0
@@ -135,7 +144,7 @@ export class ChunkManager {
         for (const part of [buildLamps(data.furniture.lamps, ground, reg), buildSignals(data.furniture.signals, ground, reg), buildSigns(data.furniture.signs, ground, reg)]) if (part) group.add(part)
       }
       this.scene.add(group)
-      const tile = { key, tx, ty, group, terrain, roads: data.roads, roadIndex, junctions: data.junctions ?? [], biome: data.biome, objects }
+      const tile = { key, tx, ty, group, terrain, roads: data.roads, roadIndex, junctions: data.junctions ?? [], biome: data.biome, objects, water: waterPolys(data.cover ?? [], data.origin) }
       this.tiles.set(key, tile)
       this.hooks.onTile?.(tile)
     } catch (e) {
@@ -221,4 +230,14 @@ function roadHeight(index, x, z, terrain) {
   if (bestOut <= -EDGE) return on
   const k0 = (bestOut + EDGE) / (2 * EDGE), k = k0 * k0 * (3 - 2 * k0)   // smoothstep over the curb band
   return on + (ground - on) * k
+}
+
+// even-odd point-in-polygon over a flat [x, z, ...] ring
+function insideRing(x, z, r) {
+  let inside = false
+  for (let i = 0, j = r.length - 2; i < r.length; j = i, i += 2) {
+    const xi = r[i], zi = r[i + 1], xj = r[j], zj = r[j + 1]
+    if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) inside = !inside
+  }
+  return inside
 }

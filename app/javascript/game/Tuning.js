@@ -68,6 +68,27 @@ export const TUNING = {
     radius: 2.2, respawn: 20, height: 0.5, size: 2.4,
   },
   fx: { smokeRate: 28, smokeLife: 0.7, smokeSlip: 0.18, smokePool: 64, flameFlicker: 0.4 },
+  mech: {
+    walk: 12, reverse: 5,  // m/s
+    accelRate: 6,          // /s: speed approaches the wanted walking speed this fast
+    turnRate: 2.4,         // rad/s, turning in place
+    slopeMax: 0.75,        // tan 37°: steeper than this ahead and the mech stops
+    probe: 1.5,            // metres ahead the slope is measured
+    jumpV: 18, gravity: 20,          // apex ≈ 8 m
+    hoverSink: 1.0,        // m/s sink while hovering (Space held after the apex)
+    hoverDrain: 0.25, shieldDrain: 0.15,   // mana per second
+    shieldSlow: 0.6,       // walking speed while the shield is up
+    manaRegen: 25,         // seconds from empty to full while casting nothing
+    ySmooth: 10,           // /s: the body eases onto curbs and steps
+    height: 4.2,           // metres, also the model's normalised height (Assets.MODELS.mech)
+    drownDepth: 1.5, drownTime: 3,   // water deeper than this for this long: "Verzopen"
+  },
+  transform: { time: 1.2, swapAt: 0.5, cooldown: 2 },
+  spells: {
+    fireball:  { mana: 0.2, speed: 60, r: 6, dmg: 80, cd: 0.6, life: 3 },
+    lightning: { mana: 0.35, range: 200, ahead: 60, r: 3, dmg: 30, cd: 1.5 },
+    aimCone: 0.44, aimRange: 300,    // auto-aim: a dragon within this angle and range is the target
+  },
   look: {
     exposure: 1.0,         // tone mapping exposure by day (the night adds up to +35 %)
     envIntensity: 0.35,    // how much the sky environment map lights standard materials

@@ -7,13 +7,16 @@ import { versioned } from "game/Textures"
 // normalised to metres (feet at the origin, facing -z like every vehicle) and cloned per instance with their
 // skeletons, each instance with its own AnimationMixer. A missing or broken file yields a stand-in box of the right
 // size so the game keeps running; `slop.assets.clips("dragon")` in the console lists the clip names a model ships.
+// Quaternius models face +z in glTF (Blender's -Y front), the game's forward is -z: half a turn for all of them.
+// Clip names (see CREDITS.md): dragon Fast_Flying / Flying_Idle / Headbutt / Punch / HitReact / Death; mech Idle /
+// Walk / Run / Jump / Shoot / Punch / Death; people Idle / Walk / Run / PickUp / Victory / Death.
 export const MODELS = {
-  dragon: { file: "dragon.glb", height: 7,   forward: 0, color: 0x8b2f2a },
-  wizard: { file: "wizard.glb", height: 1.9, forward: 0, color: 0x3b2f6b },
-  mech:   { file: "mech.glb",   height: 4.2, forward: 0, color: 0x4e5a6e },
-  npc_a:  { file: "npc_a.glb",  height: 1.75, forward: 0, color: 0x7a6a4f },
-  npc_b:  { file: "npc_b.glb",  height: 1.75, forward: 0, color: 0x5f7a4f },
-  npc_c:  { file: "npc_c.glb",  height: 1.75, forward: 0, color: 0x7a4f5f },
+  dragon: { file: "dragon.glb", height: 7,    forward: Math.PI, color: 0x8b2f2a },
+  wizard: { file: "wizard.glb", height: 1.9,  forward: Math.PI, color: 0x3b2f6b },
+  mech:   { file: "mech.glb",   height: 4.2,  forward: Math.PI, color: 0x4e5a6e },
+  npc_a:  { file: "npc_a.glb",  height: 1.75, forward: Math.PI, color: 0x7a6a4f },
+  npc_b:  { file: "npc_b.glb",  height: 1.75, forward: Math.PI, color: 0x5f7a4f },
+  npc_c:  { file: "npc_c.glb",  height: 1.75, forward: Math.PI, color: 0x7a4f5f },
 }
 
 export class Assets {
@@ -97,7 +100,15 @@ function normalise(gltf, spec) {
   root.add(inner)
   scene.traverse((o) => {
     if (o.isSkinnedMesh) o.frustumCulled = false       // the bind-pose bounds are wrong once animated; callers cull by distance
-    if (o.isMesh) { o.castShadow = o.receiveShadow = false; const m = o.material; if (m && m.metalness > 0.6) m.metalness = 0.4 }
+    if (!o.isMesh) return
+    o.castShadow = o.receiveShadow = false
+    const fix = (m) => {
+      // KHR_materials_unlit (the mech, the wizard) arrives as MeshBasicMaterial: relight it with the same texture
+      if (m.isMeshBasicMaterial) { const std = new THREE.MeshStandardMaterial({ map: m.map, color: m.color, roughness: 0.75, metalness: 0.05, side: m.side, transparent: m.transparent, alphaTest: m.alphaTest }); std.name = m.name; return std }
+      if (m.metalness > 0.6) m.metalness = 0.4
+      return m
+    }
+    o.material = Array.isArray(o.material) ? o.material.map(fix) : fix(o.material)
   })
   return { root, clips: gltf.animations ?? [], size: size.multiplyScalar(k), placeholder: false }
 }

@@ -148,6 +148,22 @@ export function buildWater(cover, heightAt, origin) {
 }
 
 // the level slot of a water entry: a number (flat surface), null (draped), or undefined for tiles built before levels existed
+// the water polygons of a tile with a known surface level, as flat [x, z, ...] outer rings in game units, for
+// ChunkManager.waterLevelAt (what the mech wades or drowns in)
+export function waterPolys(cover, origin) {
+  const [ox, oz] = origin, out = []
+  for (const entry of cover) {
+    const level = waterLevel(entry)
+    if (typeof level !== "number") continue
+    const flat = entry[2]
+    if (!flat || flat.length < 6) continue
+    const ring = new Array(flat.length)
+    for (let i = 0; i + 1 < flat.length; i += 2) { ring[i] = ox + flat[i] / 10; ring[i + 1] = oz + flat[i + 1] / 10 }
+    out.push({ level, ring })
+  }
+  return out
+}
+
 function waterLevel(entry) {
   if (entry[0] !== WATER) return undefined
   return Array.isArray(entry[1]) ? undefined : entry[1]

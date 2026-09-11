@@ -5,7 +5,8 @@ import { updateSignals, setNightLevel } from "game/Furniture"
 import { setSignsNight } from "game/Signs"
 import { DayNight } from "game/DayNight"
 import { updateWater } from "game/Cover"
-import { Vehicle } from "game/Vehicle"
+import { Avatar } from "game/Avatar"
+import { Spells } from "game/Spells"
 import { Input } from "game/Input"
 import { Network } from "game/Network"
 import { RemoteCars } from "game/RemoteCars"
@@ -51,14 +52,19 @@ async function main() {
   index.heightAt = (x, z) => chunks.heightAt(x, z)
   world.setHeightAt((x, z) => chunks.heightAt(x, z))
   const input   = new Input()
-  const car     = new Vehicle(config.spawn, vehicleSpec(localStorage.getItem("voertuig") ?? "trike"))
-  let carFx     = new VehicleFx(car.mesh, effects.smoke)
-  const combat  = new Combat({ scene: world.scene, index, effects, heightAt: (x, z) => chunks.heightAt(x, z), car, send: (action, data) => net.send(action, data) })
-  const remotes = new RemoteCars(world.scene, effects.smoke, { heightAt: (x, z) => chunks.heightAt(x, z) })
+  const assets  = new Assets()                               // glTF models for dragons, the mech and the townsfolk
+  assets.warm(["mech"])
+  // the player: a car and a wizard mech, one of them active (T transforms); `car` is the same object, kept under the
+  // old name because the camera, the HUD and the network only ever see the active body through it
+  const player  = new Avatar({ spawn: config.spawn, spec: vehicleSpec(localStorage.getItem("voertuig") ?? "trike"), scene: world.scene, assets,
+                               heightAt: (x, z) => chunks.heightAt(x, z), waterAt: (x, z) => chunks.waterLevelAt(x, z), onMode: (mode) => onMode(mode) })
+  const car     = player
+  let carFx     = new VehicleFx(player.car.mesh, effects.smoke)
+  const combat  = new Combat({ scene: world.scene, index, effects, heightAt: (x, z) => chunks.heightAt(x, z), car: player, send: (action, data) => net.send(action, data) })
+  const remotes = new RemoteCars(world.scene, effects.smoke, { heightAt: (x, z) => chunks.heightAt(x, z), assets })
   const dayNight = new DayNight(world)
   const skyEnv  = new SkyEnv(world, dayNight)               // the sky baked into an environment map for the materials
-  const shadow  = new Blob(world.scene)                      // the contact shadow under the player's car
-  const assets  = new Assets()                               // glTF models for dragons, the mech and the townsfolk
+  const shadow  = new Blob(world.scene)                      // the contact shadow under the player
   const loading = new LoadingScreen(el("laden"))
   const burnEl = el("burn")
   const burn = (ms) => { burnEl.classList.add("on"); setTimeout(() => burnEl.classList.remove("on"), ms) }
@@ -67,8 +73,9 @@ async function main() {
   const teleport = (x, z, yaw = car.yaw) => { car.reset({ x, z, yaw }); placed = false; snapToRoad = true; burn(400) }
   const voertuigEl = el("voertuig-naam"), hintEl = el("voertuig-hint")
   const applySpec = (spec) => {
-    world.scene.remove(car.setSpec(spec)); world.scene.add(car.mesh)
-    carFx = new VehicleFx(car.mesh, effects.smoke)
+    if (player.mode === "mech") player.setMode("car")
+    player.setSpec(spec)
+    carFx = new VehicleFx(player.car.mesh, effects.smoke)
     localStorage.setItem("voertuig", spec.id)
     voertuigEl.textContent = spec.naam; hintEl.textContent = spec.ability.hint
     placed = false
@@ -76,6 +83,18 @@ async function main() {
   voertuigEl.textContent = car.spec.naam; hintEl.textContent = car.spec.ability.hint
   // the picker: any vehicle, any time; the server hears about it through `switch` so the others swap your mesh
   const picker = new Picker(el("kiezer"), { onPick: (spec) => { applySpec(spec); net.send("switch", { vehicle: spec.id }) } })
+  // car ↔ mech: restyle the HUD (the boost bar is the mana bar), resize the shadow, tell the server
+  const boostEl = el("boost")
+  function onMode(mode) {
+    const mech = mode === "mech"
+    voertuigEl.textContent = player.spec.naam; hintEl.textContent = player.spec.ability.hint
+    boostEl.classList.toggle("mana", mech)
+    shadow.size(mech ? 2.2 : 1.2, mech ? 2.2 : 2.4)
+    input.clearPressed()
+    net.send("switch", { vehicle: mech ? "mech" : player.car.spec.id })
+  }
+  const spells = new Spells({ combat, effects, send: (a, d) => net.send(a, d), heightAt: (x, z) => chunks.heightAt(x, z),
+    hud: { nope: () => { boostEl.classList.add("nope"); setTimeout(() => boostEl.classList.remove("nope"), 350); session.flash("Te weinig mana") } } })
 
   // the session: who you are in the world, and what the server decides about you
   const session = new Session(playerId, { actie: el("actie"), banner: el("banner"), bannerTitel: el("banner-titel"), bannerSub: el("banner-sub"), flits: el("flits"), status: el("status") }, {
@@ -84,7 +103,8 @@ async function main() {
       if (!urlSpawn && msg.you.spawn) { config.spawn = msg.you.spawn; teleport(msg.you.spawn.x, msg.you.spawn.z, msg.you.spawn.yaw) }
       const hub = hubs.find((h) => h.key === msg.you.spawn?.hub_key) ?? nearestHub(config.spawn.x, config.spawn.z, hubs)
       if (hub && !loading.shown) loading.showHub(hub)
-      if (msg.you.vehicle && msg.you.vehicle !== car.spec.id && vehicleSpec(msg.you.vehicle).id === msg.you.vehicle) applySpec(vehicleSpec(msg.you.vehicle))
+      if (msg.you.vehicle === "mech") { if (player.mode !== "mech") player.setMode("mech") }
+      else if (msg.you.vehicle && msg.you.vehicle !== player.car.spec.id && vehicleSpec(msg.you.vehicle).id === msg.you.vehicle) applySpec(vehicleSpec(msg.you.vehicle))
     },
     onObjects: (list) => index.applyAll(list),
     onTeleport: (msg) => teleport(msg.x, msg.z, msg.yaw),
@@ -100,13 +120,18 @@ async function main() {
     },
     onHeal: () => { chunks.reload(); index.resetState(); combat.reset() },
   })
-  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
+  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, player, spells, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
   const net = new Network({ room: "main", onMessage: (m) => {
     if (m.type === "move" || m.type === "join" || m.type === "leave") { if (m.id !== playerId) remotes.receive(m); return }
-    if (m.type === "fire") { if (m.id !== playerId) combat.remoteFire(m, remotes.get(m.id)?.mesh); return }
+    if (m.type === "fire") {
+      if (m.id === playerId) return
+      const mesh = remotes.get(m.id)?.mesh
+      if (m.kind === "fireball" || m.kind === "lightning") spells.remote(m, mesh); else combat.remoteFire(m, mesh)
+      return
+    }
     session.receive(m)
   } })
   const locator = new Locator(config.places)
@@ -122,13 +147,12 @@ async function main() {
     }
   })
 
-  world.scene.add(car.mesh)
   const wall = config.border?.length ? new FlameWall(config.border) : null
   if (wall) world.scene.add(wall.mesh)
   let lastInside = null       // last position inside the border, to fall back to after burning
 
   const kmh = el("kmh"), playersEl = el("players"), clockEl = el("clock"), cooldownBar = el("cooldown-bar")
-  const boostEl = el("boost"), boostFill = el("boost-fill"), driftEl = el("drift"), pipsEl = el("drift-pips")
+  const boostFill = el("boost-fill"), driftEl = el("drift"), pipsEl = el("drift-pips")
   let shownLevel = -1, shownDrift = null, lastKmh = -1, lastMeter = -1, lastBoostOn = null, lastCooldown = -1   // DOM writes only on change
   const onPickup = (p) => {
     car.addBoost(TUNING.boost.pickupFill, TUNING.boost.pickupBurst)
@@ -168,12 +192,18 @@ async function main() {
         world.followCamera(car, 1e3)   // huge dt → camera jumps straight behind the car instead of rising out of the ground
         placed = true
       }
-      car.integrate(dt, input)
-      combat.collide(car, dt)
-      car.settle(heightAt)
-      combat.abilities(car, input, dt)
-      carFx.update(car, dt)
-      pickups.collect(car, tileIndex, onPickup)
+      player.integrate(dt, input)
+      if (player.vy === null) combat.collide(player, dt)          // airborne bodies clear everything
+      player.settle(heightAt)
+      combat.abilities(player, input, dt)                         // the car's trick on E; a landing mech stomps
+      spells.update(player, input, dt)                            // the mech's Q and F
+      if (player.mode === "car") carFx.update(player.car, dt)
+      pickups.collect(player, tileIndex, onPickup)
+      if (player.mode === "mech" && player.mech.drowned) {        // too deep for too long: back to the hub
+        player.mech.drowned = false; player.mech.drownT = 0
+        session.showBanner("Verzopen", "de mech is gezonken", 1800); burn(700)
+        player.reset(config.spawn); placed = false; snapToRoad = true
+      }
     }
     pickups.update(dt)
     combat.projectiles(dt)
@@ -219,7 +249,7 @@ async function main() {
 
     const shownKmh = Math.round(Math.hypot(car.vx, car.vz) * 3.6)
     if (shownKmh !== lastKmh) { lastKmh = shownKmh; kmh.textContent = shownKmh }
-    const cooldown = Math.round((1 - combat.cooldownFraction) * 100) / 100
+    const cooldown = Math.round((1 - (player.mode === "mech" ? spells.cooldownFraction : combat.cooldownFraction)) * 100) / 100
     if (cooldown !== lastCooldown) { lastCooldown = cooldown; cooldownBar.style.transform = `scaleX(${cooldown})` }
     const meter = Math.round(car.boostMeter * 200) / 200
     if (meter !== lastMeter) { lastMeter = meter; boostFill.style.transform = `scaleX(${meter})` }

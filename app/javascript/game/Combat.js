@@ -8,10 +8,12 @@ import { distTo } from "game/Destructibles"
 // falls (Destructibles.apply), and `fire` tells the other players what to draw. Explosions also shove nearby cars.
 const GRAVITY = 20                   // m/s² for jumps and knockback hops, arcade-heavy
 const STEP = 1.5                     // metres a shot may travel between hit tests
-const shotMats = { missile: new THREE.MeshStandardMaterial({ color: 0xd8d8d0, metalness: 0.5, roughness: 0.4 }), slug: new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.7, roughness: 0.5 }) }
+const shotMats = { missile: new THREE.MeshStandardMaterial({ color: 0xd8d8d0, metalness: 0.5, roughness: 0.4 }), slug: new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.7, roughness: 0.5 }),
+                   fireball: new THREE.MeshStandardMaterial({ color: 0xff7a1a, emissive: 0xff4500, emissiveIntensity: 2.5, roughness: 0.6 }) }
 const chargeMat = new THREE.MeshStandardMaterial({ color: 0xb01010, emissive: 0xff2020, emissiveIntensity: 1 })
 const missileGeo = (() => { const body = new THREE.CylinderGeometry(0.12, 0.12, 1.1, 8); body.rotateX(Math.PI / 2); return body })()
 const slugGeo = new THREE.SphereGeometry(0.28, 10, 8)
+const fireballGeo = new THREE.SphereGeometry(0.45, 12, 10)
 const chargeGeo = new THREE.BoxGeometry(0.5, 0.35, 0.5)
 
 export class Combat {
@@ -29,6 +31,7 @@ export class Combat {
     this.charge = null              // the brommer's sticky bomb, one at a time
     this.swing = null               // the crane's swing in progress
     this.cd = 0                     // seconds until the trick is ready again
+    this.onStrike = null            // (target, kind) when a homing shot reaches its target (Dragons.js listens)
   }
 
   // between car.integrate() and car.settle(): the bumper corners against the index. A hit pushes the car out along
@@ -46,7 +49,7 @@ export class Combat {
       const { obj, nx, nz, depth } = hit
       if (car.vy !== null && !obj.rings) continue
       if (obj.state === 1) { car.speed *= 1 - 2.5 * dt; this.queue(obj, spec.clear * Math.abs(v) * 4 * dt); continue }
-      if (spec.push && Math.abs(v) > spec.pushMin) { car.speed *= 1 - 1.5 * dt; this.queue(obj, spec.ram * Math.abs(v) * 10 * dt); this.effects.shake(0.05); continue }
+      if (spec.push && Math.abs(v) > spec.pushMin && (!spec.pushKinds || spec.pushKinds.includes(obj.kind))) { car.speed *= 1 - 1.5 * dt; this.queue(obj, spec.ram * Math.abs(v) * 10 * dt); this.effects.shake(0.05); continue }
       car.x += nx * depth; car.z += nz * depth
       const impact = Math.abs(v)
       car.speed = -0.2 * v
@@ -89,12 +92,13 @@ export class Combat {
 
   get cooldownFraction() { const c = this.car?.spec.ability.cooldown; return c ? this.cd / c : 0 }
 
-  shoot(kind, x, y, z, vx, vy, vz, gravity, life, r, dmg, own) {
-    const mesh = new THREE.Mesh(kind === "missile" ? missileGeo : slugGeo, shotMats[kind])
+  // home: optional () → { x, y, z } | null, the live position a shot steers towards (and bursts on within 8 m)
+  shoot(kind, x, y, z, vx, vy, vz, gravity, life, r, dmg, own, home = null) {
+    const mesh = new THREE.Mesh(kind === "missile" ? missileGeo : kind === "fireball" ? fireballGeo : slugGeo, shotMats[kind])
     mesh.position.set(x, y, z)
     if (kind === "missile") mesh.lookAt(x + vx, y + vy, z + vz)
     this.scene.add(mesh)
-    this.shots.push({ mesh, x, y, z, vx, vy, vz, gravity, life, r, dmg, own })
+    this.shots.push({ kind, mesh, x, y, z, vx, vy, vz, gravity, life, r, dmg, own, home, struck: null })
   }
 
   plant(x, y, z, own) {
@@ -117,6 +121,11 @@ export class Combat {
         if (s.t <= 0) { this.explode(s.x, s.y + 0.5, s.z, 10, 120, s.own); this.drop(i); if (s.own) this.charge = null }
         continue
       }
+      const target = s.home?.() ?? null
+      if (target) {                                              // steer towards the target, a quarter of the way per frame
+        const sp = Math.hypot(s.vx, s.vy, s.vz), dx = target.x - s.x, dy = target.y - s.y, dz = target.z - s.z, d = Math.hypot(dx, dy, dz) || 1
+        s.vx += (dx / d * sp - s.vx) * 0.25; s.vy += (dy / d * sp - s.vy) * 0.25; s.vz += (dz / d * sp - s.vz) * 0.25
+      }
       const n = Math.max(1, Math.ceil(Math.hypot(s.vx, s.vy, s.vz) * dt / STEP)), h = dt / n
       let burst = false
       for (let k = 0; k < n && !burst; k++) {
@@ -125,8 +134,10 @@ export class Combat {
         const ground = this.heightAt(s.x, s.z)
         const hit = this.index.hitPoint(s.x, s.z, 0.5)
         if (s.y <= ground || (hit && s.y <= ground + (hit.obj.h ?? 3) + 0.5)) burst = true
+        if (target && Math.hypot(target.x - s.x, target.y - s.y, target.z - s.z) < 8) { burst = true; s.struck = target }
+        if (s.kind === "fireball") this.effects.fire.emit(s.x, s.y, s.z, (Math.random() - 0.5) * 2, 1 + Math.random(), (Math.random() - 0.5) * 2, 0.35, 1.4, 0.3, 0.9)
       }
-      if (burst) { this.explode(s.x, s.y, s.z, s.r, s.dmg, s.own); this.drop(i); continue }
+      if (burst) { this.explode(s.x, s.y, s.z, s.r, s.dmg, s.own); if (s.struck && s.own) this.onStrike?.(s.struck, "fireball"); this.drop(i); continue }
       if ((s.life -= dt) <= 0) { this.drop(i); continue }
       s.mesh.position.set(s.x, s.y, s.z)
       if (s.gravity) s.mesh.lookAt(s.x + s.vx, s.y + s.vy, s.z + s.vz)

@@ -17,6 +17,7 @@ export class Effects {
     this.live = []
     this.shakeAmt = 0
     this.smoke = new SpritePool(scene, T.fx.smokePool, 0xd8d8d8)
+    this.fire = new SpritePool(scene, 96, 0xff8a2a, { additive: true })   // fireball trails, dragon breath
   }
 
   // a flash growing to r, debris flying out of it, dust spreading on the ground
@@ -110,11 +111,11 @@ export class Effects {
 // A fixed number of sprites that are reused round-robin: no allocation per puff, and no pressure on MAX_LIVE.
 // Each sprite owns its material once (opacity is per material). emit() takes the oldest slot.
 export class SpritePool {
-  constructor(scene, n, color) {
+  constructor(scene, n, color, { additive = false } = {}) {
     this.items = []
     this.next = 0
     for (let i = 0; i < n; i++) {
-      const mat = new THREE.SpriteMaterial({ map: dustTexture(), transparent: true, opacity: 0, depthWrite: false, color })
+      const mat = new THREE.SpriteMaterial({ map: dustTexture(), transparent: true, opacity: 0, depthWrite: false, color, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending })
       const sprite = new THREE.Sprite(mat)
       sprite.visible = false
       scene.add(sprite)

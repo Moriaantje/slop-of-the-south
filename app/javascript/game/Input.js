@@ -22,5 +22,14 @@ export class Input {
   get ability()   { return this.consume("KeyE") }
   get pick()      { return this.consume("KeyV") }
   get digit()     { for (let i = 1; i <= 6; i++) if (this.consume(`Digit${i}`)) return i; return 0 }
+  // the wizard mech: T transforms, Space jumps (tap) and hovers (hold), Shift raises the shield, Q and F cast
+  get transform() { return this.consume("KeyT") }
+  get jump()      { return this.consume("Space") }
+  get hover()     { return this.keys.has("Space") }
+  get shield()    { return this.boost }
+  get fireball()  { return this.consume("KeyQ") }
+  get lightning() { return this.consume("KeyF") }
+  get talk()      { return this.consume("KeyE") }
   consume(code)   { const had = this.pressed.has(code); this.pressed.delete(code); return had }
+  clearPressed()  { this.pressed.clear() }
 }
