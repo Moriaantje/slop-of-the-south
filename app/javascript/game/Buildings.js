@@ -1,6 +1,6 @@
 import * as THREE from "three"
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js"
-import { collapseRange, scaleRange, buildingHp } from "game/Destructibles"
+import { foldable, scaleRange, buildingHp } from "game/Destructibles"
 
 const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 })
 material.__shared = true
@@ -45,6 +45,6 @@ export function buildBuildings(buildings, reg) {
   if (!geos.length) return null
   const merged = mergeGeometries(geos, false)
   geos.forEach((g) => g.dispose())
-  for (const h of handles) reg(h.key, { ...h, remove: () => collapseRange(merged.attributes.position, h.start, h.count), tint: (k) => scaleRange(merged.attributes.color, h.start, h.count, k) })
+  for (const h of handles) { const fold = foldable(merged.attributes.position, h.start, h.count); reg(h.key, { ...h, remove: fold.remove, restore: fold.restore, tint: (k) => scaleRange(merged.attributes.color, h.start, h.count, k) }) }
   return new THREE.Mesh(merged, material)
 }

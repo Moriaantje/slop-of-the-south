@@ -1,5 +1,5 @@
 import * as THREE from "three"
-import { pointKey, hideInstance } from "game/Destructibles"
+import { pointKey, hideInstance, showInstance } from "game/Destructibles"
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js"
 
 // Street furniture: lamp posts (BGT lichtmast) and traffic lights (BGT signal poles, or one pole per approach at an
@@ -62,7 +62,7 @@ export function buildLamps(lamps, heightAt, reg) {
       poles.setMatrixAt(i, m); heads.setMatrixAt(i, m)
       const hx = x + Math.sin(dir * Math.PI / 180) * 1.3, hz = z - Math.cos(dir * Math.PI / 180) * 1.3   // under the head
       pools.setMatrixAt(i, m.compose(p.set(hx, heightAt(hx, hz) + 0.2, hz), flat, ps))
-      reg?.(pointKey("l", x, z), { kind: "l", x, z, r: 0.25, h, max: 12, remove: () => { hideInstance(poles, i); hideInstance(heads, i); hideInstance(pools, i) } })
+      reg?.(pointKey("l", x, z), { kind: "l", x, z, r: 0.25, h, max: 12, remove: () => { hideInstance(poles, i); hideInstance(heads, i); hideInstance(pools, i) }, restore: () => { showInstance(poles, i); showInstance(heads, i); showInstance(pools, i) } })
     })
     poles.instanceMatrix.needsUpdate = heads.instanceMatrix.needsUpdate = pools.instanceMatrix.needsUpdate = true
     poles.geometry.__shared = heads.geometry.__shared = true
@@ -106,7 +106,7 @@ export function buildSignals(signals, heightAt, reg) {
     poles.setMatrixAt(i, m); heads.setMatrixAt(i, m)
     for (let k = 0; k < 3; k++) { m.compose(p.set(x, y + 3.66 - k * 0.36, z), q, s); lights.setMatrixAt(i * 3 + k, m); lights.setColorAt(i * 3 + k, DARK[k]) }
     entries.push({ i, phase: Math.round(face / 90) % 2, offset: (groupId * 7919) % CYCLE })
-    reg?.(pointKey("g", x, z), { kind: "g", x, z, r: 0.25, h: 3.7, max: 20, remove: () => { hideInstance(poles, i); hideInstance(heads, i); for (let k = 0; k < 3; k++) hideInstance(lights, i * 3 + k) } })
+    reg?.(pointKey("g", x, z), { kind: "g", x, z, r: 0.25, h: 3.7, max: 20, remove: () => { hideInstance(poles, i); hideInstance(heads, i); for (let k = 0; k < 3; k++) hideInstance(lights, i * 3 + k) }, restore: () => { showInstance(poles, i); showInstance(heads, i); for (let k = 0; k < 3; k++) showInstance(lights, i * 3 + k) } })
   })
   poles.instanceMatrix.needsUpdate = heads.instanceMatrix.needsUpdate = lights.instanceMatrix.needsUpdate = true
   const entry = { lights, entries, state: new Int8Array(signals.length).fill(-1) }

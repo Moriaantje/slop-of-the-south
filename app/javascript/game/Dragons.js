@@ -3,23 +3,61 @@ import { TUNING as T, lerpAngle, wrapAngle } from "game/Tuning"
 import { makeBeacon, placeBeacon, showBeacon, disposeBeacon } from "game/Beacon"
 import { FireCone } from "game/FireCone"
 import { Blob } from "game/Shadows"
+import { pbr } from "game/Textures"
 
 // The dragons as the server tells them: `actors` messages at 4 Hz while one is awake (a heartbeat every two seconds
 // otherwise) carry position, heading, speed and state; here each dragon is drawn a quarter second behind those
 // samples, interpolated between them and extrapolated along its heading for up to a second when the next sample is
-// late. Each is a huge serpent: the winged glTF model (14 m tall, 30 m across) is the head and forebody, and a
-// long tapering spine of segments with dorsal fins trails behind along the path the head actually flew, so a
-// dragon banking over a town is a hundred metres of body curving through the sky, visible from the next village.
-// The model plays by state (Flying_Idle perched, Fast_Flying on the wing, Headbutt while breathing, Death once),
-// banks into turns, breathes a fire cone with a sprite stream, carries a name beacon and a contact shadow.
-// `nearest(x, z, yaw)` names the dragon the mech is aiming at; `struck(target, kind)` reports a spell hit.
+// late. Each is a huge serpent built here from primitives, in the spirit of the sky dragons of Breath of the Wild:
+// a horned head with glowing eyes and a frill, a long tapering body of scaled segments with dorsal fins that trails
+// along the path the head actually flew, and a pair of membrane wings a little way down the neck that beat while
+// it flies and fold when it perches. A dragon banking over a town is a hundred metres of body curving through the
+// sky, visible from the next village. It breathes a fire cone with a sprite stream (the jaw opens), carries a name
+// beacon and a contact shadow, and sinks to the ground when it dies. `nearest(x, z, yaw)` names the dragon the
+// mech is aiming at; `struck(target, kind)` reports a spell hit.
 const DELAY_MS = 250, EXTRAPOLATE_MS = 1000, HIDE_DEAD_MS = 8000
-// the serpent body: segment count, spacing along the path, radius from the hips to the tail tip, the anchor behind the model
-const SEGMENTS = 26, SPACING = 3.6, R0 = 2.6, R1 = 0.35, ANCHOR = 7, HISTORY = 600
-const bodyGeo = new THREE.SphereGeometry(1, 12, 9); bodyGeo.__shared = true
+// the serpent body: segment count, spacing along the path, radius behind the head → the tail tip, history length
+const SEGMENTS = 32, SPACING = 3.4, R0 = 2.4, R1 = 0.3, ANCHOR = 4, HISTORY = 700, WING_AT = 4
+const bodyGeo = (() => { const g = new THREE.SphereGeometry(1, 14, 10); const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 5, uv.getY(i) * 2.5); g.__shared = true; return g })()
 const finGeo = (() => { const g = new THREE.ConeGeometry(0.5, 1, 4, 1); g.translate(0, 0.5, 0); g.__shared = true; return g })()
-const bodyMat = new THREE.MeshStandardMaterial({ color: 0x7a2a22, roughness: 0.65, metalness: 0.1, emissive: 0x2a0800, emissiveIntensity: 0.4 }); bodyMat.__shared = true
-const finMat = new THREE.MeshStandardMaterial({ color: 0xd8b04a, roughness: 0.5, emissive: 0x402800, emissiveIntensity: 0.6, side: THREE.DoubleSide }); finMat.__shared = true
+const hornGeo = (() => { const g = new THREE.ConeGeometry(0.45, 3.2, 7); g.translate(0, 1.6, 0); g.__shared = true; return g })()
+const eyeGeo = new THREE.SphereGeometry(0.42, 10, 8); eyeGeo.__shared = true
+// roof tiles tinted blood-red make a fair scale hide; one shared material for every dragon
+const scaleMat = pbr("rooftile", { color: 0x6a2420, tint: 0xa6463a, size: 1, roughness: 0.55, metalness: 0.1 })
+const boneMat = new THREE.MeshStandardMaterial({ color: 0xd9cdb0, roughness: 0.5 }); boneMat.__shared = true
+const finMat = new THREE.MeshStandardMaterial({ color: 0xd8a03a, roughness: 0.5, emissive: 0x3a2000, emissiveIntensity: 0.5, side: THREE.DoubleSide }); finMat.__shared = true
+const wingMat = new THREE.MeshStandardMaterial({ color: 0x5a1c18, roughness: 0.7, side: THREE.DoubleSide, transparent: true, opacity: 0.92, emissive: 0x200600, emissiveIntensity: 0.5 }); wingMat.__shared = true
+const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffb040, emissive: 0xff8a10, emissiveIntensity: 3, roughness: 0.3 }); eyeMat.__shared = true
+const wingGeo = (() => {
+  // a membrane fanned from the shoulder: leading edge out to 17 m, three fingers, scalloped trailing edge; x out, -z forward
+  const pts = [[0, 0, 0], [6, 0.6, -1.5], [12, 0.9, -1.0], [17, 0.6, 0.5], [15.5, 0, 4.5], [11, -0.3, 6.5], [6, -0.4, 6.0], [1.5, -0.2, 4.5]]
+  const pos = [], idx = []
+  for (const p of pts) pos.push(...p)
+  for (let i = 1; i < pts.length - 1; i++) idx.push(0, i, i + 1)
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals(); g.__shared = true
+  return g
+})()
+const wingBoneGeo = (() => { const g = new THREE.CylinderGeometry(0.22, 0.32, 17, 6); g.rotateZ(-Math.PI / 2); g.translate(8.5, 0.3, -0.5); g.__shared = true; return g })()
+
+// the head: skull, snout, jaw (opens while breathing), horns, eyes and a frill of fins; faces -z from its own origin
+function makeHead() {
+  const head = new THREE.Group()
+  const skull = new THREE.Mesh(bodyGeo, scaleMat); skull.scale.set(2.4, 2.0, 3.4); skull.position.set(0, 0, -1.2); head.add(skull)
+  const snout = new THREE.Mesh(bodyGeo, scaleMat); snout.scale.set(1.6, 1.15, 3.6); snout.position.set(0, -0.35, -5.0); head.add(snout)
+  const jaw = new THREE.Group(); jaw.position.set(0, -1.05, -2.2); head.add(jaw)
+  const jawMesh = new THREE.Mesh(bodyGeo, scaleMat); jawMesh.scale.set(1.4, 0.55, 3.2); jawMesh.position.set(0, -0.3, -2.8); jaw.add(jawMesh)
+  for (const s of [-1, 1]) {
+    const horn = new THREE.Mesh(hornGeo, boneMat); horn.position.set(s * 1.3, 1.3, 0.6); horn.rotation.set(-0.9, 0, s * 0.35); head.add(horn)
+    const eye = new THREE.Mesh(eyeGeo, eyeMat); eye.position.set(s * 1.05, 0.55, -2.9); head.add(eye)
+    const brow = new THREE.Mesh(hornGeo, boneMat); brow.scale.set(0.35, 0.35, 0.35); brow.position.set(s * 1.5, 0.9, -2.2); brow.rotation.set(-1.2, 0, s * 0.9); head.add(brow)
+  }
+  for (let i = 0; i < 7; i++) {                                                     // the frill around the back of the head
+    const a = (i / 6 - 0.5) * Math.PI * 1.1
+    const fin = new THREE.Mesh(finGeo, finMat); fin.scale.set(1.2, 3.2 - Math.abs(a) * 1.2, 0.4)
+    fin.position.set(Math.sin(a) * 2.2, 0.4 + Math.cos(a) * 1.6, 1.4); fin.rotation.set(0.5, 0, -a); head.add(fin)
+  }
+  return { head, jaw }
+}
 
 export class Dragons {
   constructor({ scene, assets, effects, session, send, heightAt, hud = null }) {
@@ -47,29 +85,36 @@ export class Dragons {
   }
 
   spawn(s) {
-    const inst = this.assets.instantiate("dragon")
     const root = new THREE.Group()
-    root.add(inst.root)
+    const { head, jaw } = makeHead()
+    root.add(head)
     this.scene.add(root)
-    const head = new THREE.Group(); head.position.set(0, 8.5, -9); root.add(head)          // roughly the mouth of the 14 m model
-    // the serpent body: segments in world space, following the head's path
+    const mouth = new THREE.Group(); mouth.position.set(0, -0.6, -7.5); head.add(mouth)
+    // the serpent body: segments in world space, following the head's path; the wings ride on segment WING_AT
     const body = new THREE.Group()
     const segs = []
     for (let i = 0; i < SEGMENTS; i++) {
       const k = i / (SEGMENTS - 1), r = R0 * (1 - k) + R1 * k
-      const seg = new THREE.Mesh(bodyGeo, bodyMat)
+      const seg = new THREE.Mesh(bodyGeo, scaleMat)
       seg.scale.set(r, r * 0.85, SPACING * 0.72)
       const fin = new THREE.Mesh(finGeo, finMat)
-      fin.scale.set(r * 0.9, r * 1.6 * (1 - 0.5 * k), 1)
-      fin.position.y = 0.7                                                         // in the unit sphere: on the back
+      fin.scale.set(0.9, 1.6 * (1 - 0.5 * k) / 0.85, 0.35 / (SPACING * 0.72) * r)   // in the parent's stretched frame
+      fin.position.y = 0.7                                                          // in the unit sphere: on the back
       seg.add(fin)
-      fin.scale.x /= r; fin.scale.y /= (r * 0.85); fin.scale.z /= (SPACING * 0.72)   // undo the parent's stretch
       body.add(seg); segs.push(seg)
     }
+    const wings = [-1, 1].map((side) => {
+      const w = new THREE.Group()
+      const membrane = new THREE.Mesh(wingGeo, wingMat), bone = new THREE.Mesh(wingBoneGeo, boneMat)
+      w.add(membrane, bone)
+      w.scale.x = side
+      body.add(w)
+      return w
+    })
     this.scene.add(body)
     return { id: s.id, name: s.name, lair: s.lair, state: s.state, prevState: null, stateAt: 0, hp: s.hp, max: s.max, target: s.target,
-      buf: [], lastSeen: 0, root, inst, head, cone: new FireCone(head), beacon: makeBeacon(this.scene, 0xff6a3a),
-      shadow: new Blob(this.scene, 8, 14), x: s.x, y: s.y, z: s.z, yaw: s.yaw, speed: 0, roll: 0, alive: s.state !== "dead", deathPlayed: false,
+      buf: [], lastSeen: 0, root, head, jaw, wings, flap: 0, cone: new FireCone(mouth), beacon: makeBeacon(this.scene, 0xff6a3a),
+      shadow: new Blob(this.scene, 8, 14), x: s.x, y: s.y, z: s.z, yaw: s.yaw, speed: 0, roll: 0, alive: s.state !== "dead", sink: 0,
       body, segs, path: [], pathLen: [], t: Math.random() * 10 }
   }
 
@@ -108,6 +153,16 @@ export class Dragons {
       seg.position.set(sx, sy, sz)
       seg.lookAt(px, py, pz)
       seg.visible = d.root.visible
+      if (i === WING_AT) {                                                            // the wings ride this segment, beating or folded
+        const flying = d.state !== "perch" && d.state !== "dead"
+        d.flap += dt * (flying ? 1.1 : 0.25) * Math.PI * 2
+        const beat = flying ? 0.15 + 0.5 * Math.sin(d.flap) : 1.25 + 0.05 * Math.sin(d.flap)
+        for (const w of d.wings) {
+          w.position.set(sx, sy + 0.8, sz); w.quaternion.copy(seg.quaternion)
+          w.rotateZ(-Math.sign(w.scale.x) * beat)
+          w.visible = d.root.visible
+        }
+      }
       px = sx; py = sy; pz = sz
     }
   }
@@ -118,7 +173,6 @@ export class Dragons {
     if (!d) return
     d.hp = msg.hp
     if (msg.by === this.session.playerId) { this.hud?.hit?.(); this.effects.flash(d.x, d.y, d.z, 3) }
-    if (d.inst.ready && d.state !== "dead") d.inst.play(/hit/i, { once: true, fade: 0.1 })
   }
 
   // a spell of ours reached a dragon: tell the server, predict the hp
@@ -167,12 +221,14 @@ export class Dragons {
       }
       const yawRate = dt > 0 ? wrapAngle(yaw - d.yaw) / dt : 0
       d.roll += (THREE.MathUtils.clamp(-yawRate * 0.8, -0.7, 0.7) - d.roll) * Math.min(1, dt * 4)
+      d.alive = d.state !== "dead"
+      if (!d.alive) { d.sink = Math.min(1, d.sink + dt / 6); y = Math.max(this.heightAt(x, z) + 2, y - d.sink * d.sink * 60) }   // a dead dragon comes down
+      else d.sink = 0
       d.x = x; d.y = y; d.z = z; d.yaw = yaw; d.speed = c.speed
       d.root.position.set(x, y, z)
       d.root.rotation.set(0, yaw, 0)
       d.root.rotateX(-pitch); d.root.rotateZ(d.roll)
-      d.alive = d.state !== "dead"
-      this.animate(d, dt)
+      d.jaw.rotation.x += ((d.state === "breathe" ? 0.55 : 0.04) - d.jaw.rotation.x) * Math.min(1, dt * 6)
       this.serpent(d, yaw, pitch, dt)
       // breath: the cone from the mouth, the strongest one drives the shared shader; the nearest streams sprites
       const breathing = d.state === "breathe"
@@ -193,25 +249,11 @@ export class Dragons {
     if (nearestBreather) this.stream(nearestBreather, dt)
   }
 
-  animate(d, dt) {
-    const inst = d.inst
-    if (!inst.ready) return
-    if (d.state === "dead") {
-      if (!d.deathPlayed) { d.deathPlayed = true; inst.play(/death/i, { once: true, fade: 0.2 }) }
-    } else {
-      d.deathPlayed = false
-      const want = d.state === "perch" ? [/flying_idle/i, /idle/i] : d.state === "breathe" ? [/headbutt/i, /punch/i, /fast/i] : [/fast/i, /fly/i]
-      const ts = d.state === "perch" ? 0.6 : d.state === "breathe" ? 1 : Math.max(0.7, d.speed / 25)
-      for (const re of want) if (inst.play(re, { timeScale: ts })) break
-    }
-    inst.update(dt)
-  }
-
   // sprites down the breath of the nearest breathing dragon
   stream(d, dt) {
     this.fireAcc += dt * 60
     const fx = -Math.sin(d.yaw), fz = -Math.cos(d.yaw)
-    const mx = d.x + fx * 9, my = d.y + 8, mz = d.z + fz * 9
+    const mx = d.x + fx * 8, my = d.y - 0.6, mz = d.z + fz * 8
     while (this.fireAcc >= 1) {
       this.fireAcc -= 1
       const s = 30 + Math.random() * 18, j = () => (Math.random() - 0.5) * 8
@@ -229,7 +271,7 @@ export class Dragons {
   }
 
   reset() {
-    for (const d of this.list.values()) { this.scene.remove(d.root, d.body); disposeBeacon(d.beacon); d.shadow.dispose(); d.inst.dispose() }
+    for (const d of this.list.values()) { this.scene.remove(d.root, d.body); disposeBeacon(d.beacon); d.shadow.dispose() }
     this.list.clear()
   }
 }

@@ -1,4 +1,22 @@
+import * as THREE from "three"
 import { makeBeacon, placeBeacon, showBeacon } from "game/Beacon"
+
+// the objective marker: a tall amber column of light on the target (seen from kilometres), the sky beacon with the
+// name, and a line laid over the ground from the player towards it
+const pillarGeo = new THREE.CylinderGeometry(3, 4.5, 360, 14, 1, true); pillarGeo.translate(0, 180, 0); pillarGeo.__shared = true
+const pillarMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+  uniforms: { time: { value: 0 } },
+  vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */`
+    uniform float time; varying vec2 vUv;
+    void main() {
+      float fade = pow(1.0 - vUv.y, 1.6);                                            // bright at the ground, gone at the top
+      float bands = 0.75 + 0.25 * sin(vUv.y * 40.0 - time * 2.0);
+      gl_FragColor = vec4(vec3(1.0, 0.68, 0.18) * fade * bands, fade * 0.55);
+    }`,
+})
+const TRAIL_N = 48
 
 // Quests on the client: the dialogue panel (the person's lines typed out, the offers on 1–3, H to heal, Esc to
 // close), the quest log (J), the objective — an amber beacon and a minimap ring on the target of the current quest
@@ -16,6 +34,13 @@ export class Quests {
     this.objectiveIndex = 0
     this.beacon = makeBeacon(scene, 0xffb000)
     showBeacon(this.beacon, false)
+    this.pillar = new THREE.Mesh(pillarGeo, pillarMat); this.pillar.visible = false; this.pillar.frustumCulled = false; this.pillar.renderOrder = 6
+    scene.add(this.pillar)
+    const trailGeo = new THREE.BufferGeometry(); trailGeo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(TRAIL_N * 3), 3))
+    this.trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0xffb000, transparent: true, opacity: 0.85, depthWrite: false }))
+    this.trail.visible = false; this.trail.frustumCulled = false; this.trail.renderOrder = 6
+    scene.add(this.trail)
+    this.trailT = 0
     els.dialoog.hidden = true
     els.log.hidden = true
   }
@@ -101,7 +126,23 @@ export class Quests {
     }
     const o = this.objective
     showBeacon(this.beacon, !!o)
-    if (o) placeBeacon(this.beacon, o.x, this.heightAt(o.x, o.z), o.z, this.current.target.name, player, camera)
+    this.pillar.visible = this.trail.visible = !!o
+    if (!o) return
+    const gy = this.heightAt(o.x, o.z)
+    placeBeacon(this.beacon, o.x, gy, o.z, this.current.target.name, player, camera)
+    this.pillar.position.set(o.x, gy - 2, o.z)
+    pillarMat.uniforms.time.value += dt
+    // the guide line follows the ground from the player to the target, refreshed a few times a second
+    this.trailT += dt
+    if (this.trailT > 0.2) {
+      this.trailT = 0
+      const pos = this.trail.geometry.attributes.position
+      for (let i = 0; i < TRAIL_N; i++) {
+        const k = i / (TRAIL_N - 1), x = player.x + (o.x - player.x) * k, z = player.z + (o.z - player.z) * k
+        pos.setXYZ(i, x, this.heightAt(x, z) + 0.7 + k * 0.5, z)
+      }
+      pos.needsUpdate = true
+    }
   }
 
   renderOptions() {

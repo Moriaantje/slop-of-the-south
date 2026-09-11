@@ -1,5 +1,5 @@
 import * as THREE from "three"
-import { pointKey, hideInstance } from "game/Destructibles"
+import { pointKey, hideInstance, showInstance } from "game/Destructibles"
 
 // Procedural low-poly trees: trunk, recursive branches and leaf clusters at the tips. A handful of variants per
 // kind is generated once from fixed seeds; every tree picks its variant, rotation, width and tint from a hash of
@@ -45,7 +45,7 @@ export function buildTrees(trees, heightAt, reg) {
       s.set(h * width, h, h * width)                           // geometry is 1 unit tall
       mesh.setMatrixAt(i, m.compose(p.set(x, heightAt(x, z) - 0.15, z), q, s))
       mesh.setColorAt(i, color.setRGB(tint, tint * (0.97 + 0.06 * rand(x, z + 2)), tint * 0.95))
-      reg?.(pointKey("t", x, z), { kind: "t", x, z, r: THREE.MathUtils.clamp(0.08 * h, 0.3, 1), h, max: 30, remove: () => hideInstance(mesh, i) })
+      reg?.(pointKey("t", x, z), { kind: "t", x, z, r: THREE.MathUtils.clamp(0.08 * h, 0.3, 1), h, max: 30, remove: () => hideInstance(mesh, i), restore: () => showInstance(mesh, i) })
     })
     mesh.instanceMatrix.needsUpdate = true
     mesh.instanceColor.needsUpdate = true

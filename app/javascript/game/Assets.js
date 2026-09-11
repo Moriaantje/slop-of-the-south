@@ -8,10 +8,9 @@ import { versioned } from "game/Textures"
 // skeletons, each instance with its own AnimationMixer. A missing or broken file yields a stand-in box of the right
 // size so the game keeps running; `slop.assets.clips("dragon")` in the console lists the clip names a model ships.
 // Quaternius models face +z in glTF (Blender's -Y front), the game's forward is -z: half a turn for all of them.
-// Clip names (see CREDITS.md): dragon Fast_Flying / Flying_Idle / Headbutt / Punch / HitReact / Death; mech Idle /
-// Walk / Run / Jump / Shoot / Punch / Death; people Idle / Walk / Run / PickUp / Victory / Death.
+// Clip names (see CREDITS.md): mech Idle / Walk / Run / Jump / Shoot / Punch / Death; people Idle / Walk / Run /
+// PickUp / Victory / Death. The dragons are built from primitives in Dragons.js.
 export const MODELS = {
-  dragon: { file: "dragon.glb", height: 14,   forward: Math.PI, color: 0x8b2f2a },
   wizard: { file: "wizard.glb", height: 1.9,  forward: Math.PI, color: 0x3b2f6b },
   mech:   { file: "mech.glb",   height: 4.2,  forward: Math.PI, color: 0x4e5a6e },
   npc_a:  { file: "npc_a.glb",  height: 1.75, forward: Math.PI, color: 0x7a6a4f },

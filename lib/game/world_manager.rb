@@ -97,7 +97,7 @@ module Game
     def hit(player_id, hits)
       @mutex.synchronize do
         return unless @sessions[player_id]
-        hits.each { |key, damage, max| (obj = @world.hit(key, damage, max)) && @dirty[obj.key] = obj }
+        hits.each { |key, damage, max| (obj = @world.hit(key, damage, max, Game.now_ms)) && @dirty[obj.key] = obj }
       end
     end
 
@@ -164,9 +164,10 @@ module Game
           result = actors.tick(now, @sessions.values) || {}
           room_msgs.concat(result[:messages] || [])
           (result[:burns] || []).each { |id, damage, x, z| (s = @sessions[id]) && burn(s, damage, x, z, now, room_msgs, personal_msgs) }
-          (result[:hits] || []).each { |key, damage, max| (obj = @world.hit(key, damage, max)) && @dirty[obj.key] = obj }
+          (result[:hits] || []).each { |key, damage, max| (obj = @world.hit(key, damage, max, now)) && @dirty[obj.key] = obj }
           (result[:kills] || []).each { |lair_key, ids| quests&.on_kill(lair_key, ids, now, @sessions, personal_msgs) }
         end
+        @world.rebuild(now).each { @dirty[_1.key] = _1 }                  # what nobody hit for a while stands again
         @sessions.each_value { |s| regen(s, now); discover(s, now, personal_msgs) }
         quests&.tick(now, @sessions, personal_msgs)
         @you_dirty.each { |id| (s = @sessions[id]) && personal_msgs << [ id, { type: "you" }.merge(status(s)) ] }

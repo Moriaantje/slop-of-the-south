@@ -1,5 +1,5 @@
 import * as THREE from "three"
-import { collapseRange, scaleRange, hullXZ, buildingHp } from "game/Destructibles"
+import { foldable, scaleRange, hullXZ, buildingHp } from "game/Destructibles"
 import { pbr, pbrEnabled } from "game/Textures"
 import { LOOK } from "game/TerrainTile"
 import { TUNING as T } from "game/Tuning"
@@ -182,9 +182,10 @@ export function buildBuildingMeshes(meshes, reg) {
   }
   if (!Object.keys(geos).length) return null
   for (const h of handles) {
-    const rs = h.ranges.map((r) => ({ geo: geos[r.name], start: r.start, count: r.count }))
+    const rs = h.ranges.map((r) => ({ geo: geos[r.name], start: r.start, count: r.count, fold: foldable(geos[r.name].attributes.position, r.start, r.count) }))
     reg(h.key, { ...h, ranges: rs,
-      remove: () => { for (const r of rs) collapseRange(r.geo.attributes.position, r.start, r.count) },
+      remove: () => { for (const r of rs) r.fold.remove() },
+      restore: () => { for (const r of rs) r.fold.restore() },
       tint: (k) => { for (const r of rs) scaleRange(r.geo.attributes.color, r.start, r.count, k) } })
   }
   const group = new THREE.Group()

@@ -45,3 +45,13 @@ test("remove() collapses every range of the building", () => {
     for (let i = r.start; i < r.start + r.count; i++) assert.ok(p.getX(i) === x && p.getY(i) === y)
   }
 })
+
+test("restore() unfolds a collapsed building again", () => {
+  const handles = new Map()
+  buildBuildingMeshes([house], (k, h) => handles.set(k, h))
+  const h = handles.get("m:h1")
+  const before = h.ranges.map((r) => Array.from(r.geo.attributes.position.array))
+  h.remove()
+  h.restore()
+  h.ranges.forEach((r, i) => assert.deepEqual(Array.from(r.geo.attributes.position.array), before[i]))
+})

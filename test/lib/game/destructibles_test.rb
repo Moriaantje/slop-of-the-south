@@ -29,3 +29,22 @@ module Game
     end
   end
 end
+
+module Game
+  class DestructiblesRebuildTest < ActiveSupport::TestCase
+    T = 1_700_000_000_000
+
+    test "what nobody hits for a while stands again, houses last" do
+      w = Destructibles.new
+      w.hit("t:1,2", 30, 30, T)                    # a tree: gone
+      w.hit("m:9", 150, 100, T)                    # a house: rubble
+      assert_equal %i[gone rubble], [ w.objects["t:1,2"].state, w.objects["m:9"].state ]
+      assert_empty w.rebuild(T + 299_000)
+      back = w.rebuild(T + 300_000)
+      assert_equal [ [ "t:1,2", :intact, 30.0 ] ], back.map { [ _1.key, _1.state, _1.hp ] }
+      assert_nil w.objects["t:1,2"]
+      assert_equal [ "m:9" ], w.rebuild(T + 600_000).map(&:key)
+      assert_empty w.objects
+    end
+  end
+end

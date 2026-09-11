@@ -56,7 +56,7 @@ async function main() {
   world.setHeightAt((x, z) => chunks.heightAt(x, z))
   const input   = new Input()
   const assets  = new Assets()                               // glTF models for dragons, the mech and the townsfolk
-  assets.warm(["mech", "dragon", "npc_a", "npc_b", "npc_c"])
+  assets.warm(["mech", "npc_a", "npc_b", "npc_c"])
   // the player: a car and a wizard mech, one of them active (T transforms); `car` is the same object, kept under the
   // old name because the camera, the HUD and the network only ever see the active body through it
   const player  = new Avatar({ spawn: config.spawn, spec: vehicleSpec(localStorage.getItem("voertuig") ?? "trike"), scene: world.scene, assets,

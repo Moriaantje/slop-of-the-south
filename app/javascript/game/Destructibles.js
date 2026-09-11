@@ -104,7 +104,15 @@ export class Destructibles {
   }
 
   transition(obj, hp, max, s, silent) {
-    if (s > obj.state) {
+    if (s < obj.state) {                                        // rebuilt: the rubble goes, the thing stands again
+      if (obj.rubble) { obj.tile.group.remove(obj.rubble); obj.rubble.geometry.dispose(); obj.rubble = null }
+      if (s === 0) {
+        obj.restore?.()
+        if (obj.tint && obj.shade !== 1) { obj.tint(1 / obj.shade); obj.shade = 1 }
+        if (!silent) this.effects?.dust(obj.x, this.groundOf(obj) + 1, obj.z, obj.rings ? Math.max(obj.maxX - obj.minX, obj.maxZ - obj.minZ) / 3 : 1.5)
+      }
+      obj.state = s
+    } else if (s > obj.state) {
       if (obj.state === 0) {
         obj.remove()
         if (s === 1) {
@@ -118,8 +126,8 @@ export class Destructibles {
         if (!silent) this.effects?.dust(obj.x, this.groundOf(obj) + 1, obj.z, obj.rings ? Math.max(obj.maxX - obj.minX, obj.maxZ - obj.minZ) / 2 : 2)
       }
       obj.state = s
-    } else if (s === obj.state && s === 0 && hp < obj.hp && obj.tint) {
-      const shade = 0.55 + 0.45 * hp / (max || obj.max)
+    } else if (s === obj.state && s === 0 && hp !== obj.hp && obj.tint) {
+      const shade = 0.55 + 0.45 * Math.min(1, hp / (max || obj.max))
       obj.tint(shade / obj.shade)
       obj.shade = shade
     }
@@ -188,9 +196,30 @@ export function scaleRange(attr, start, count, k) {
 
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0)
 export function hideInstance(mesh, i) {
+  const kept = (mesh.userData.hidden ??= new Map())
+  if (!kept.has(i)) { const m = new THREE.Matrix4(); mesh.getMatrixAt(i, m); kept.set(i, m) }
   mesh.setMatrixAt(i, ZERO)
   mesh.instanceMatrix.addUpdateRange(i * 16, 16)
   mesh.instanceMatrix.needsUpdate = true
+}
+
+// the instance comes back where it stood (rebuilt)
+export function showInstance(mesh, i) {
+  const m = mesh.userData.hidden?.get(i)
+  if (!m) return
+  mesh.userData.hidden.delete(i)
+  mesh.setMatrixAt(i, m)
+  mesh.instanceMatrix.addUpdateRange(i * 16, 16)
+  mesh.instanceMatrix.needsUpdate = true
+}
+
+// a collapsible vertex range that remembers its shape: remove() folds it, restore() unfolds it
+export function foldable(attr, start, count) {
+  let saved = null
+  return {
+    remove: () => { if (!saved) saved = attr.array.slice(start * 3, (start + count) * 3); collapseRange(attr, start, count) },
+    restore: () => { if (!saved) return; attr.array.set(saved, start * 3); saved = null; attr.addUpdateRange(start * 3, count * 3); attr.needsUpdate = true },
+  }
 }
 
 // rings are flat [x, z, x, z, ...]

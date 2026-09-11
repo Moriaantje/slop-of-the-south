@@ -1,6 +1,6 @@
 import * as THREE from "three"
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js"
-import { pointKey, collapseRange } from "game/Destructibles"
+import { pointKey, foldable } from "game/Destructibles"
 
 // NDW traffic signs drawn from the RVV sign catalogue. Every sign face is painted procedurally on a canvas from its RVV
 // code (A1 speed limit, B6 yield, G11 cycle path …) plus the value on it (black code) or its text, cached per look.
@@ -62,10 +62,10 @@ export function buildSigns(signs, heightAt, reg) {
     merged.set(mat, { geo, starts, counts })
   }
   if (reg) for (const { pole, parts } of handles) {
-    let removed = false
-    const remove = () => { if (removed) return; removed = true; for (const { mat, idx } of parts) { const m = merged.get(mat); collapseRange(m.geo.attributes.position, m.starts[idx], m.counts[idx]) } }
+    const folds = parts.map(({ mat, idx }) => { const m = merged.get(mat); return foldable(m.geo.attributes.position, m.starts[idx], m.counts[idx]) })
+    const remove = () => { for (const f of folds) f.remove() }, restore = () => { for (const f of folds) f.restore() }
     const keys = [...new Set(pole.list.map((s) => pointKey("s", s[0], s[1])))]
-    reg(keys[0], { kind: "s", keys, x: pole.x, z: pole.z, r: 0.3, h: 2.5, max: 6, remove })
+    reg(keys[0], { kind: "s", keys, x: pole.x, z: pole.z, r: 0.3, h: 2.5, max: 6, remove, restore })
   }
   return group
 }
