@@ -60,7 +60,7 @@ export class Suspension {
     for (let i = 0; i < this.wheels.length; i++) {
       const w = this.wheels[i]
       const cornerY = this.h - w.lz * sp + w.lx * sr
-      w.pivot.position.y = S.wheelRadius + clamp(g[i] - cornerY, -S.travel, S.travel)
+      w.pivot.position.y = (w.r ?? S.wheelRadius) + clamp(g[i] - cornerY, -S.travel, S.travel)
       w.pivot.rotation.y = w.front ? (car.steer ?? 0) : 0
       w.mesh.rotation.x = -(car.wheelAngle ?? 0)                                         // axle is local x; forward roll is negative
     }

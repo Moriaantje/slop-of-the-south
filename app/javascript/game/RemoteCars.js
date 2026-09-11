@@ -1,5 +1,5 @@
 import * as THREE from "three"
-import { makeCarMesh } from "game/Vehicle"
+import { makeVehicleMesh } from "game/Vehicles"
 import { makeBeacon, placeBeacon, disposeBeacon } from "game/Beacon"
 import { VehicleFx } from "game/VehicleFx"
 import { TUNING as T, lerpAngle, wrapAngle } from "game/Tuning"
@@ -9,7 +9,8 @@ const TIMEOUT_MS = 6000
 
 // Keeps a short buffer of positions per remote player and interpolates between them. Every other player carries a
 // sky beacon (Beacon.js) with their name and distance. Their wheels spin and steer from the interpolated motion, and
-// the drift/boost flags in the move messages light their tyre smoke and exhaust flames.
+// the drift/boost flags in the move messages light their tyre smoke and exhaust flames. The mesh follows the vehicle
+// named in the move messages and is swapped when the player picks another.
 export class RemoteCars {
   constructor(scene, smokePool = null) {
     this.scene = scene
@@ -36,12 +37,19 @@ export class RemoteCars {
     if (msg.type === "leave") return this.remove(msg.id)
     if (msg.type !== "move") return
     let car = this.cars.get(msg.id)
+    const vehicle = msg.vehicle || "auto"
     if (!car) {
       const color = colorFor(msg.id)
-      const mesh = makeCarMesh(color)
-      car = { mesh, color, buf: [], lastSeen: 0, brake: false, drift: false, boost: false, name: "", beacon: makeBeacon(this.scene, color), fx: new VehicleFx(mesh, this.pool), wheelAngle: 0 }
-      this.scene.add(car.mesh)
+      car = { mesh: null, vehicle: null, color, buf: [], lastSeen: 0, brake: false, drift: false, boost: false, name: "", beacon: makeBeacon(this.scene, color), fx: null, wheelAngle: 0 }
       this.cars.set(msg.id, car)
+    }
+    if (car.vehicle !== vehicle) {
+      if (car.mesh) this.scene.remove(car.mesh)
+      car.vehicle = vehicle
+      car.mesh = makeVehicleMesh(vehicle, car.color)
+      car.fx = new VehicleFx(car.mesh, this.pool)
+      this.scene.add(car.mesh)
+      this.relight(car)
     }
     car.name = msg.name || "Chauffeur"
     if (!!msg.brake !== car.brake) { car.brake = !!msg.brake; this.relight(car) }
@@ -77,6 +85,8 @@ export class RemoteCars {
       if (local && camera) placeBeacon(car.beacon, x, y, z, car.name, local, camera)
     }
   }
+
+  get(id) { return this.cars.get(id) }
 
   remove(id) {
     const car = this.cars.get(id)

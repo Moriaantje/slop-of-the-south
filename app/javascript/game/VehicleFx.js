@@ -25,7 +25,7 @@ export class VehicleFx {
         for (const w of this.rear) {
           w.pivot.getWorldPosition(_p)
           const jx = (Math.random() - 0.5) * 0.6, jz = (Math.random() - 0.5) * 0.6
-          this.pool.emit(_p.x + jx, _p.y - T.susp.wheelRadius + 0.15, _p.z + jz,
+          this.pool.emit(_p.x + jx, _p.y - (w.r ?? T.susp.wheelRadius) + 0.15, _p.z + jz,
             (state.vx ?? 0) * 0.3 + jx, 0.7 + Math.random() * 0.5, (state.vz ?? 0) * 0.3 + jz,
             F.smokeLife, 0.5, 1.8, 0.4)
         }

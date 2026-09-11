@@ -22,6 +22,8 @@
   <%# round start / result banner in the middle of the screen %>
   <div id="banner" class="bord" hidden><div id="banner-titel"></div><div id="banner-sub" class="bord-wijk"></div></div>
   <div id="flits" hidden></div>
+  <%# the vehicle you drive and its trick (Vehicles.js); the bar fills while the trick recharges %>
+  <div id="voertuig"><b id="voertuig-naam"></b> <span id="voertuig-hint"></span><div class="cooldown"><i id="cooldown-bar"></i></div></div>
   <div id="speed">
     <div id="drift" hidden>DRIFT <span id="drift-pips">○○○</span></div>
     <div id="boost"><div id="boost-fill"></div></div>
@@ -31,7 +33,7 @@
 
 <div id="burn"></div>
 <canvas id="minimap" class="minimap"></canvas>
-<div id="help">W A S D of pijltjes · spatie + sturen = driften (loslaten = turbo) · shift = boost · blauwe ringen op de weg = boost · R terug op de weg · M kaart (slepen, scrollen, klik = teleport) · N muziek</div>
+<div id="help">W A S D of pijltjes · spatie + sturen = driften (loslaten = turbo) · shift = boost · E wapen · V voertuig · R terug op de weg · M kaart (klik = teleport) · N muziek</div>
 
 <%# the loading screen between rounds (LoadingScreen.js): the town's pictures, name and story while the tiles stream in %>
 <div id="laden" hidden>
@@ -46,6 +48,12 @@
     <div class="laden-balk"><i></i></div>
     <div class="laden-bron">Foto's en tekst: Wikipedia</div>
   </div>
+</div>
+<%# the vehicle picker (Picker.js): six cards, over the loading screen between towns or on V during a round %>
+<div id="kiezer" hidden>
+  <div class="kiezer-kop">Kies je voertuig</div>
+  <div class="kaarten"></div>
+  <div class="kiezer-hint"></div>
 </div>
 <%# the parade's music: a hidden YouTube player (Music.js) %>
 <div id="muziek"></div>
@@ -112,4 +120,25 @@
   .laden-balk i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #e0241a, #f2c14e, #2a9d3a); transition: width .3s; }
   .laden-bron { font-size: 11px; opacity: .5; margin-top: 8px; }
   #muziek { position: fixed; left: -300px; top: -300px; width: 1px; height: 1px; opacity: .01; pointer-events: none; }
+
+  #voertuig { position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%); font-size: 14px; background: rgba(255, 255, 255, .6);
+              padding: 6px 14px 8px; border-radius: 6px; white-space: nowrap; }
+  #voertuig-hint { opacity: .75; margin-left: 6px; }
+  #voertuig .cooldown { height: 4px; margin-top: 5px; background: rgba(0, 0, 0, .15); border-radius: 2px; overflow: hidden; }
+  #cooldown-bar { display: block; height: 100%; width: 100%; background: #0f3f8f; transform-origin: left; }
+  #kiezer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; padding: 14px 8vw 16px; color: #fff;
+            background: linear-gradient(to top, rgba(8, 10, 16, .94), rgba(8, 10, 16, .7)); font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  .kiezer-kop { font-size: 13px; letter-spacing: .3em; text-transform: uppercase; opacity: .8; margin-bottom: 10px; }
+  .kaarten { display: flex; gap: 10px; }
+  .kaart { flex: 1; position: relative; background: rgba(255, 255, 255, .08); border: 2px solid rgba(255, 255, 255, .12); border-radius: 10px;
+           padding: 12px 14px 12px; cursor: pointer; transition: background .15s, border-color .15s; }
+  .kaart:hover { background: rgba(255, 255, 255, .16); }
+  .kaart.actief { border-color: #f2c14e; background: rgba(242, 193, 78, .18); }
+  .kaart kbd { position: absolute; right: 10px; top: 9px; font: 11px/1 "Helvetica Neue", Helvetica, Arial, sans-serif; padding: 3px 6px; border-radius: 4px; background: rgba(255, 255, 255, .15); }
+  .kaart b { display: block; font-size: 17px; margin-bottom: 2px; }
+  .kaart .snelheid { color: #f2c14e; letter-spacing: 2px; font-size: 12px; }
+  .kaart p { font-size: 12.5px; line-height: 1.35; opacity: .85; margin: 6px 0 0; }
+  .kiezer-hint { font-size: 12px; opacity: .6; margin-top: 10px; }
+  #laden.met-kiezer .laden-tekst { bottom: 320px; }
+  #laden.met-kiezer .laden-voet { bottom: 250px; }
 </style>

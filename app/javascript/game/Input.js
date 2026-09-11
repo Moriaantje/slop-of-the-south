@@ -19,5 +19,8 @@ export class Input {
   get reset()     { return this.consume("KeyR") }
   get toggleMap() { return this.consume("KeyM") }
   get mute()      { return this.consume("KeyN") }
+  get ability()   { return this.consume("KeyE") }
+  get pick()      { return this.consume("KeyV") }
+  get digit()     { for (let i = 1; i <= 6; i++) if (this.consume(`Digit${i}`)) return i; return 0 }
   consume(code)   { const had = this.pressed.has(code); this.pressed.delete(code); return had }
 }

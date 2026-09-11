@@ -16,6 +16,8 @@ import { Round } from "game/Round"
 import { Parade } from "game/Parade"
 import { LoadingScreen } from "game/LoadingScreen"
 import { Music } from "game/Music"
+import { vehicleSpec } from "game/Vehicles"
+import { Picker } from "game/Picker"
 import { Destructibles } from "game/Destructibles"
 import { Combat } from "game/Combat"
 import { Effects } from "game/Effects"
@@ -46,8 +48,8 @@ async function main() {
   world.setHeightAt((x, z) => chunks.heightAt(x, z))
   const combat  = new Combat({ index, effects, send: (action, data) => net.send(action, data) })
   const input   = new Input()
-  const car     = new Vehicle(config.spawn)
-  const carFx   = new VehicleFx(car.mesh, effects.smoke)
+  const car     = new Vehicle(config.spawn, vehicleSpec(localStorage.getItem("voertuig") ?? "trike"))
+  let carFx     = new VehicleFx(car.mesh, effects.smoke)
   const remotes = new RemoteCars(world.scene, effects.smoke)
   const dayNight = new DayNight(world)
   const parade  = new Parade(world.scene)
@@ -58,6 +60,19 @@ async function main() {
   let placed = false          // car and camera snapped onto the terrain once the spawn tile is in
   let snapToRoad = urlSpawn   // after a map teleport or a ?spawn= URL: move onto the nearest street once its tile is in
   const teleport = (x, z, yaw = car.yaw) => { car.reset({ x, z, yaw }); placed = false; snapToRoad = true; burn(400) }
+  const voertuigEl = el("voertuig-naam"), hintEl = el("voertuig-hint")
+  const applySpec = (spec) => {
+    world.scene.remove(car.setSpec(spec)); world.scene.add(car.mesh)
+    carFx = new VehicleFx(car.mesh, effects.smoke)
+    localStorage.setItem("voertuig", spec.id)
+    voertuigEl.textContent = spec.naam; hintEl.textContent = spec.ability.hint
+    placed = false
+  }
+  voertuigEl.textContent = car.spec.naam; hintEl.textContent = car.spec.ability.hint
+  const ladenEl = el("laden")
+  // the picker: free at the first join and behind the loading screen; mid-round it goes through the server's action
+  const picker = new Picker(el("kiezer"), { onPick: (spec, free) => { if (free) applySpec(spec); else net.send("switch", { vehicle: spec.id }) } })
+  const lobby = (open) => { ladenEl.classList.toggle("met-kiezer", open); if (open) picker.show(car.spec.id, true); else picker.hide() }
 
   // the round: a new town restores the world and drops everyone on its spawn road behind the loading screen (a page
   // load mid-round too, unless the URL asked for a spot)
@@ -67,17 +82,21 @@ async function main() {
         chunks.reload(); index.resetRound(); combat.reset()
         config.spawn = body.spawn
         if (live || !urlSpawn) teleport(body.spawn.x, body.spawn.z, body.spawn.yaw)
-        if (body.status !== "ended") loading.show(body.arena, body.id)
+        if (body.status !== "ended") { loading.show(body.arena, body.id); lobby(true) }
       }
       index.applyAll(body.obstacles.concat(body.objects))
       parade.setRound(round)
-      if (body.status === "ended") loading.hide()
+      if (body.status === "ended") { loading.hide(); lobby(false) }
     },
     onObjects: (list) => index.applyAll(list),
     onEnd: (msg) => { parade.hide(); combat.enabled = false; effects.confetti(msg.x, chunks.heightAt(msg.x, msg.z) + 4, msg.z) },
-    onAction: (msg) => { if (msg.type === "teleport") teleport(msg.x, msg.z) },
+    onAction: (msg) => {
+      if (msg.type === "teleport") teleport(msg.x, msg.z)
+      if (msg.type === "switch") { applySpec(vehicleSpec(msg.vehicle)); round.flash(`Je rijdt nu een ${car.spec.naam.toLowerCase()}`) }
+    },
   })
-  window.slop = { world, dayNight, car, remotes, chunks, round, parade, index, combat, effects, pickups, music, loading, tuning: TUNING }   // for poking at the scene from the console
+  picker.show(car.spec.id, true)
+  window.slop = { world, dayNight, car, remotes, chunks, round, parade, index, combat, effects, pickups, music, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
@@ -125,6 +144,13 @@ async function main() {
     updateWater(dayNight.env, timer.getElapsed())
     if (input.toggleMap) minimap.toggle()
     if (input.mute) round.flash(music.toggle() ? "Muziek uit" : "Muziek aan")
+    if (input.pick) {
+      if (!round.running) picker.show(car.spec.id, true)
+      else if (round.canAct()) picker.show(car.spec.id, false)
+      else round.flash(`Actie beschikbaar over ${round.countdown()}`)
+    }
+    const digit = input.digit
+    if (digit) picker.digit(digit)
     if (chunks.ready(car.x, car.z)) {
       if (input.reset) { car.reset(config.spawn); placed = false }
       if (!placed) {
@@ -165,7 +191,7 @@ async function main() {
     effects.update(dt, world.camera)
     remotes.update(car, world.camera)
     parade.update(round.now(), dt, chunks, car, world.camera)
-    if (loading.open && round.running && chunks.readyFraction(car.x, car.z) >= 1) loading.hide()
+    if (loading.open && round.running && chunks.readyFraction(car.x, car.z) >= 1) { loading.hide(); lobby(false) }
 
     netTimer += dt
     if (netTimer > 0.1) { netTimer = 0; net.sendMove(car.state()); combat.flush() }
