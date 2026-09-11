@@ -157,7 +157,15 @@ comes from `localStorage.driverName`, settable with `?name=Pietje`.
     game/Tuning.js           every feel constant in one object (window.slop.tuning), smoothing helpers, seeded RNG
     game/Input.js            keyboard
     game/Network.js          Action Cable
-    game/RemoteCars.js       interpolation of other players, their wheels, smoke and flames
+    game/RemoteCars.js       interpolation of other players, their wheels, smoke and flames, their vehicle meshes
+    game/Beacon.js           sky label with a line down: other players and the parade float
+    game/Round.js            the round as the server tells it: town, route, obstacles, clock offset, action cooldown, HUD
+    game/Parade.js           the praalwagen on its route (position from the shared clock), the red ribbon, the beacon
+    game/Destructibles.js    every object a player can flatten: 25 m grid, hit tests, collapse/hide, rubble heaps
+    game/Combat.js           ramming, rubble, the six tricks, projectiles, explosions and knockback, `hit` batches
+    game/Effects.js          flashes, debris, dust, confetti, camera shake, sprite pools
+    game/Vehicles.js         the roster (specs + box-built meshes), game/Picker.js the six cards
+    game/LoadingScreen.js    town photo, name and story between rounds; game/Music.js the YouTube player
 
 ### 1.7 Milestones
 
@@ -166,9 +174,42 @@ comes from `localStorage.driverName`, settable with `?name=Pietje`.
 3. **Real terrain** — AHN heights; buildings sit correctly on slopes. *(done: `dem:fetch dem:build`, 10 m grid from PDOK WCS)*
 4. **Multiplayer** — see each other drive; name tags. *(channel + client already scaffolded)*
 5. **Feel** — sound, skid marks, better car model, day/night, collisions with buildings.
-6. **Game** — checkpoints between the villages, time trials, leaderboards (Solid Queue jobs),
-   maybe a "deliver the vlaai" delivery mode.
+6. **Game** — *(done: the vastelaovend parade, see 1.8)*. Later: time trials, leaderboards, a "deliver the vlaai" mode.
 7. **Scale** — full bounding box (WORLD_BBOX=full for every fetch task); the Maas and Julianakanaal lie just outside the phase-1 box. *(trees, water, land cover done via BGT)*
+
+### 1.8 Vastelaovend: the parade round
+
+A Blast Corps-style co-op round, fifteen minutes each. A praalwagen rolls in a straight line across a 2.5 km square
+around a random Limburg town; if it reaches any standing building, tree, lamp post, traffic light or sign the
+parade is stuck and the round is lost. Players clear the route together. Flattened buildings leave rubble that has
+to be cleared too. The float plays a vastelaovend playlist, louder the closer you are (N mutes).
+
+**Rounds.** `Game::RoundManager` (lib/game) owns the round per room from a thread that ticks four times a second,
+started by the first subscription so it lives in the Puma process (the development cable adapter is in-process):
+idle → intermission (20 s, a new town) → running → ended (8 s) → intermission. `Game::Arena` picks a town whose
+arena lies inside the province, draws the route through it at a random heading, lists everything in the float's
+6 m corridor with the distance at which its nose arrives (PostGIS), rejects corridors with fewer than 15 or more
+than 250 obstacles or one within 120 m of the start, finds a spawn road, and asks `Game::TownInfo` for the town's
+Wikipedia paragraph and photographs. The float's position is a pure function of the start time and speed, so the
+clients render it from a clock offset (`now` on every manager message) without traffic. `Game::Round` owns hit
+points: a client reports damage with the object's size-based maximum, buildings crumble to rubble at zero (half
+their points back) and then to gone, everything else goes at once; verdicts leave in one coalesced `object`
+message per tick. Every new town restores the world: the clients drop and re-stream their tiles.
+
+**Objects.** Keys: `m:<BAG id>` for LoD2.2 meshes (with a 2D footprint `fp` in the tile), `b:<id>` for extruded
+buildings, and `t/l/g/s:<dm x>,<dm z>` for trees, lamps, traffic lights and signs from their tile coordinates,
+which both sides round to a decimetre. The tile builders register a handle per object (vertex range or instance
+index) and `Destructibles.js` keeps them in a grid for the car and the weapons.
+
+**Vehicles.** Brommer (fastest, sticky charge), trike (missiles), monstertruck (jump), tank (slugs), bulldozer
+(rams through, clears rubble in one pass) and sloopkraan (wrecking ball). E fires the trick; a shared action
+(teleport from the map or vehicle switch) has a minute of cooldown, reset at every new town; switching is free
+between rounds. Explosions shove nearby cars, nobody dies.
+
+**Protocol.** Server → client: `sync` (on subscribe), `round` (status changes), `object`, `end`, `teleport` and
+`switch` verdicts, plus the relayed `move` (with `vehicle`, `drift`, `boost`) and `fire`. Client → server: `move`,
+`hit {hits: [{key, damage, max}]}`, `fire`, `teleport {x, z}`, `switch {vehicle}`. Tunables are the constants at
+the top of `lib/game/*.rb`, `Vehicles.js` and `Combat.js`. `bin/rails test` covers the round logic and the channel.
 
 ---
 
@@ -238,9 +279,10 @@ Open http://localhost:3000 in two browser windows and drive.
   on disk, so an empty database yields a flat 40 m NAP world and a 404 per tile in the dev log on first load.
 - With LoD2.2 buildings a dense town tile is about 1 MB of JSON (roughly 100 MB for phase 1). Fine locally; serve
   `public/tiles` gzipped (or move to a binary tile format) before putting it on the internet.
-Controls: W/↑ accelerate, S/↓ brake/reverse, A/D or ←/→ steer, Space handbrake, Shift boost, R reset to road, M expand
-the minimap (drag to pan, scroll to zoom, F fits the whole area, click to teleport, Esc closes). `?spawn=x,z,yaw` in
-the URL spawns at game coordinates.
+Controls: W/↑ accelerate, S/↓ brake/reverse, A/D or ←/→ steer, Space handbrake, Shift boost, E trick, V vehicle
+picker (1–6 pick), N music, R reset to road, M expand the minimap (drag to pan, scroll to zoom, F fits the whole
+area, click to teleport, Esc closes). `?spawn=x,z,yaw` in the URL spawns at game coordinates, `?time=13` freezes
+the clock.
 
 ### Driving
 
