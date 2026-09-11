@@ -124,7 +124,9 @@ export class ChunkManager {
   build(tx, ty, key, data) {
     try {
       const objects = new Map(), reg = (key, handle) => objects.set(key, handle)
-      const terrain = new TerrainTile(data, this.cfg, data.cover?.length ? paintCover(data.cover) : null)
+      const paint = data.cover?.length ? paintCover(data.cover) : null
+      const terrain = new TerrainTile(data, this.cfg, paint)
+      const coverClass = paint ? classifyCover(paint.image) : null          // where grass may grow (Grass.js)
       this.ortho.request({ key, tx, ty, terrain })
       const group = new THREE.Group()
       group.add(terrain.mesh)
@@ -148,7 +150,7 @@ export class ChunkManager {
       if (roads) roads.traverse((o) => { if (o.isMesh) o.receiveShadow = true })
       for (const g of [buildings, meshes, trees]) g?.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
       this.scene.add(group)
-      const tile = { key, tx, ty, group, terrain, roads: data.roads, roadIndex, junctions: data.junctions ?? [], biome: data.biome, objects, water: waterPolys(data.cover ?? [], data.origin) }
+      const tile = { key, tx, ty, group, terrain, roads: data.roads, roadIndex, junctions: data.junctions ?? [], biome: data.biome, objects, water: waterPolys(data.cover ?? [], data.origin), coverClass }
       this.tiles.set(key, tile)
       this.hooks.onTile?.(tile)
     } catch (e) {
@@ -203,7 +205,7 @@ function indexRoads(roads, junctions) {
     put(Math.min(s[0], s[3]) - r, Math.min(s[1], s[4]) - r, Math.max(s[0], s[3]) + r, Math.max(s[1], s[4]) + r, s)
   }
   for (const j of junctions) { const r = j[3] + EDGE; put(j[0] - r, j[1] - r, j[0] + r, j[1] + r, j) }   // junctions are 4-element arrays
-  return { x0, z0, nx, nz, cells }
+  return { x0, z0, nx, nz, cells, cell: CELL }
 }
 
 // Ground height at (x, z): on a road ribbon or junction patch it is the surface the client draws (the road level or the
@@ -263,6 +265,14 @@ function withoutMeshed(buildings, meshes) {
     }
     return true
   })
+}
+
+// the painted land cover shrunk to a 128 px class grid (RGBA, 1 byte per channel): green means grass may grow there
+function classifyCover(canvas, n = 128) {
+  const c = document.createElement("canvas"); c.width = c.height = n
+  const ctx = c.getContext("2d", { willReadFrequently: true })
+  ctx.drawImage(canvas, 0, 0, n, n)
+  return { n, data: ctx.getImageData(0, 0, n, n).data }
 }
 
 // even-odd point-in-polygon over a flat [x, z, ...] ring

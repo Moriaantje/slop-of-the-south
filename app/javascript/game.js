@@ -11,6 +11,8 @@ import { Dragons } from "game/Dragons"
 import { Npcs } from "game/Npcs"
 import { Quests } from "game/Quests"
 import { Clouds } from "game/Clouds"
+import { Post } from "game/Post"
+import { Grass, GRASS_UNIFORMS } from "game/Grass"
 import { TREE_UNIFORMS } from "game/Trees"
 import { flag } from "game/Flags"
 import { textureStats } from "game/Textures"
@@ -72,6 +74,8 @@ async function main() {
   const dayNight = new DayNight(world)
   const skyEnv  = new SkyEnv(world, dayNight)               // the sky baked into an environment map for the materials
   const clouds  = new Clouds(world.scene)
+  const post    = new Post(world)                             // ambient occlusion, bloom, grade (?post=0 for the bare renderer)
+  const grass   = new Grass(world.scene, (x, z) => chunks.heightAt(x, z))
   // ?debug=1: a corner readout of what the renderer is doing, with any shader compile errors (paste it when it looks wrong)
   const debugEl = el("debug"), shaderErrors = []
   debugEl.hidden = !flag("debug")
@@ -214,7 +218,8 @@ async function main() {
     const darkness = dayNight.update()
     skyEnv.update(now)
     clouds.update(dt, world.camera, dayNight.env)
-    TREE_UNIFORMS.uTime.value += dt
+    TREE_UNIFORMS.uTime.value += dt; GRASS_UNIFORMS.uTime.value += dt
+    grass.update(chunks.tiles, ...chunks.tileIndex(car.x, car.z))
     car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)
     updateWater(dayNight.env, timer.getElapsed())
     if (input.toggleMap) minimap.toggle()
@@ -298,7 +303,7 @@ async function main() {
         const info = world.renderer.info, gl = world.renderer.getContext(), dbg = gl.getExtension("WEBGL_debug_renderer_info")
         debugEl.textContent = [
           `${fps} fps · ${info.render.calls} calls · ${(info.render.triangles / 1e6).toFixed(2)} M tris · ${info.memory.textures} textures · ${info.programs?.length ?? "?"} programs`,
-          `gpu ${dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "?"} · shadows ${world.shadows ? "on" : "off"} · ${navigator.userAgent.split(") ").pop()}`,
+          `gpu ${dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "?"} · shadows ${world.shadows ? "on" : "off"} · post ${post.enabled ? "on" : "off"} · grass ${grass.layers.size} tiles · ${navigator.userAgent.split(") ").pop()}`,
           `textures ok ${textureStats.ok} failed ${textureStats.failed} ${textureStats.last}`,
           `ortho ${chunks.ortho.enabled ? `ready ${chunks.ortho.stats.ready} loads ${chunks.ortho.stats.loads} failed ${chunks.ortho.stats.failed}` : "off"} · tiles ${chunks.tiles.size}`,
           ...(shaderErrors.length ? [`SHADER ERRORS (${shaderErrors.length}): ${shaderErrors[shaderErrors.length - 1]}`] : []),
@@ -329,7 +334,7 @@ async function main() {
     }
     playersEl.textContent = remotes.count ? `${remotes.count} andere ${remotes.count === 1 ? "chauffeur" : "chauffeurs"} online` : ""
 
-    world.render()
+    post.render(darkness)
     if (++frames >= 30) { const t = performance.now(); fps = Math.round(frames * 1000 / (t - fpsT)); frames = 0; fpsT = t }
     requestAnimationFrame(frame)
   }
