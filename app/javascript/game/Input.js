@@ -30,6 +30,11 @@ export class Input {
   get fireball()  { return this.consume("KeyQ") }
   get lightning() { return this.consume("KeyF") }
   get talk()      { return this.consume("KeyE") }
+  // quests: J the log, K the next objective, H heal in a dialogue, Esc closes it
+  get log()       { return this.consume("KeyJ") }
+  get cycle()     { return this.consume("KeyK") }
+  get heal()      { return this.consume("KeyH") }
+  get escape()    { return this.consume("Escape") }
   consume(code)   { const had = this.pressed.has(code); this.pressed.delete(code); return had }
   clearPressed()  { this.pressed.clear() }
 }

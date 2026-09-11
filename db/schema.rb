@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_12_000003) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_12_000004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -138,6 +138,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_12_000003) do
     t.index ["geom"], name: "index_poles_on_geom", using: :gist
     t.index ["kind"], name: "index_poles_on_kind"
     t.index ["source", "source_id"], name: "index_poles_on_source_and_source_id", unique: true
+  end
+
+  create_table "quests", force: :cascade do |t|
+    t.datetime "accepted_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "deadline_at"
+    t.string "hub_key", null: false
+    t.string "key", null: false
+    t.string "kind", null: false
+    t.jsonb "objective", default: {}, null: false
+    t.string "player_id", null: false
+    t.jsonb "progress", default: {}, null: false
+    t.jsonb "reward", default: {}, null: false
+    t.string "status", default: "active", null: false
+    t.datetime "updated_at", null: false
+    t.index ["player_id", "key"], name: "index_quests_on_player_id_and_key", unique: true
+    t.index ["player_id", "status"], name: "index_quests_on_player_id_and_status"
   end
 
   create_table "road_surfaces", force: :cascade do |t|

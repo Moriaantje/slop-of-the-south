@@ -25,14 +25,14 @@ module Game
       def shutdown = @lock.synchronize { @managers.each_value(&:stop); @managers.clear }
     end
 
-    attr_reader :room, :sessions, :world, :quests
+    attr_reader :room, :sessions, :world
 
-    # actors: :default builds the dragons from the lair hubs; pass nil for none (tests pass their own)
-    def initialize(room, hubs: nil, store: nil, actors: :default, quests: nil, publish: nil, publish_to: nil, threaded: true)
+    # actors: :default builds the dragons from the lair hubs, quests: :default the quest board; pass nil for none
+    def initialize(room, hubs: nil, store: nil, actors: :default, quests: :default, publish: nil, publish_to: nil, threaded: true)
       @room, @threaded = room, threaded
       @hubs_given = hubs
       @store = store || PlayerStore.new
-      @actors_arg, @quests = actors, quests
+      @actors_arg, @quests_arg = actors, quests
       @publish    = publish    || ->(payload)     { ActionCable.server.broadcast("game:#{room}", payload) }
       @publish_to = publish_to || ->(id, payload) { ActionCable.server.broadcast("game:#{room}:p:#{id}", payload) }
       @mutex, @sessions, @world, @dirty = Mutex.new, {}, Destructibles.new, {}
@@ -49,6 +49,13 @@ module Game
       @actors = @actors_arg == :default ? Actors::Dragons.new(hubs) : @actors_arg
     end
 
+    def quests
+      return @quests if defined?(@quests)
+      @quests = @quests_arg == :default ? Quests::Board.new(hubs) : @quests_arg
+      @quests.on_change = ->(s) { @you_dirty << s.id } if @quests.respond_to?(:on_change=)
+      @quests
+    end
+
     # returns the `sync` payload for the new subscriber; the same player in several tabs is counted once
     def join(player_id, name, now = Game.now_ms)
       attrs = @sessions.key?(player_id) ? nil : @store.load(player_id, name)     # the database call stays outside the lock
@@ -60,7 +67,7 @@ module Game
         s.changed = true
         @empty_since = nil
         { now:, you: you(s), players: @sessions.values.map { { id: _1.id, name: _1.name, vehicle: _1.vehicle } },
-          objects: @world.damaged.map { @world.obj_h(_1) }, actors: actors&.snapshot(now) || [], quests: @quests&.for_player(s) || [] }
+          objects: @world.damaged.map { @world.obj_h(_1) }, actors: actors&.snapshot(now) || [], quests: quests&.for_player(s) || [] }
       end
     end
 
@@ -69,6 +76,7 @@ module Game
         s = @sessions[player_id] or next
         next if (s.tabs -= 1).positive?
         @sessions.delete(player_id)
+        quests&.forget(player_id)
         @empty_since = now if @sessions.empty?
         s
       end
@@ -125,6 +133,16 @@ module Game
       [ true, result ]
     end
 
+    # talk / accept / abandon / heal at a hub: the board answers on the player's personal stream
+    def quest(player_id, action, now = Game.now_ms, **args)
+      msgs = @mutex.synchronize do
+        s = @sessions[player_id] or next [ { type: "quest", ok: false, reason: "player" } ]
+        quests ? quests.handle(action, s, now, **args) : [ { type: "quest", ok: false, reason: "quests" } ]
+      end
+      msgs.each { @publish_to.call(player_id, _1.merge(now:)) }
+      msgs
+    end
+
     # Dragon fire (or anything else that hurts): takes hp unless the player holds a shield, tells the room so every
     # screen shows it, and kills at zero. Call under the mutex from a tick, or on its own otherwise.
     def burn(session, damage, x, z, now, room_msgs, personal_msgs)
@@ -147,10 +165,10 @@ module Game
           room_msgs.concat(result[:messages] || [])
           (result[:burns] || []).each { |id, damage, x, z| (s = @sessions[id]) && burn(s, damage, x, z, now, room_msgs, personal_msgs) }
           (result[:hits] || []).each { |key, damage, max| (obj = @world.hit(key, damage, max)) && @dirty[obj.key] = obj }
-          (result[:kills] || []).each { |lair_key, ids| @quests&.on_kill(lair_key, ids, now, @sessions, personal_msgs) }
+          (result[:kills] || []).each { |lair_key, ids| quests&.on_kill(lair_key, ids, now, @sessions, personal_msgs) }
         end
         @sessions.each_value { |s| regen(s, now); discover(s, now, personal_msgs) }
-        @quests&.tick(now, @sessions, personal_msgs)
+        quests&.tick(now, @sessions, personal_msgs)
         @you_dirty.each { |id| (s = @sessions[id]) && personal_msgs << [ id, { type: "you" }.merge(status(s)) ] }
         @you_dirty.clear
         room_msgs << { type: "object", list: @dirty.values.map { @world.obj_h(_1) } } if @dirty.any?
@@ -209,7 +227,7 @@ module Game
       s.changed = true
       @you_dirty << s.id
       personal_msgs << [ s.id, { type: "discover", hub: { key: hub.key, name: hub.name, role: hub.role }, xp: DISCOVER_XP } ]
-      @quests&.on_discover(hub.key, s, now, personal_msgs)
+      quests&.on_discover(hub.key, s, now, personal_msgs)
     end
 
     def near_hub(s, r)
@@ -227,7 +245,7 @@ module Game
       s.hurt_at = nil
       s.changed = true
       @you_dirty << s.id
-      @quests&.on_death(s, now, personal_msgs)
+      quests&.on_death(s, now, personal_msgs)
       room_msgs << { type: "death", id: s.id, x: s.x&.round(1), z: s.z&.round(1), respawn: spawn }
     end
 

@@ -26,6 +26,15 @@
   <div id="doelwit" hidden><span id="doelwit-naam"></span><div class="hpbar"><i id="doelwit-bar"></i></div></div>
   <%# a spell landed %>
   <div id="hitmark"></div>
+  <%# talk prompt near a person (Npcs.js) %>
+  <div id="prompt" hidden></div>
+  <%# the dialogue with a person and the quest log (Quests.js) %>
+  <div id="dialoog" hidden>
+    <div class="dialoog-kop"><b id="dialoog-naam"></b> <span id="dialoog-rol"></span></div>
+    <div id="dialoog-tekst"></div>
+    <div id="dialoog-opties"></div>
+  </div>
+  <div id="logboek" hidden><div class="logboek-kop">Opdrachten</div><div id="logboek-lijst"></div></div>
   <%# the vehicle you drive and its trick (Vehicles.js); the bar fills while the trick recharges %>
   <div id="voertuig"><b id="voertuig-naam"></b> <span id="voertuig-hint"></span><div class="cooldown"><i id="cooldown-bar"></i></div></div>
   <div id="speed">
@@ -37,7 +46,7 @@
 
 <div id="burn"></div>
 <canvas id="minimap" class="minimap"></canvas>
-<div id="help">W A S D of pijltjes · spatie + sturen = driften (loslaten = turbo) · shift = boost · E wapen · V voertuig · T = tovenaarsmech (Q vuurbal · F bliksem · shift schild · spatie spring/zweef) · R terug op de weg · M kaart (klik op een ontdekte plaats = teleport)</div>
+<div id="help">W A S D of pijltjes · spatie + sturen = driften (loslaten = turbo) · shift = boost · E wapen / praat · V voertuig · T = tovenaarsmech (Q vuurbal · F bliksem · shift schild · spatie spring/zweef) · J opdrachten · K doel · R terug op de weg · M kaart (klik op een ontdekte plaats = teleport)</div>
 <div id="credits">Luchtfoto © Beeldmateriaal Nederland (CC BY 4.0) via PDOK · kaartdata © OpenStreetMap, 3D BAG, BGT, AHN, NDW · texturen ambientCG (CC0) · modellen Quaternius (CC0)</div>
 
 <%# the loading screen (LoadingScreen.js): the place's pictures, name and story while the tiles stream in %>
@@ -94,6 +103,25 @@
   #hitmark { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; opacity: 0;
              background: conic-gradient(from 45deg, #fff 0 25%, transparent 0 50%, #fff 0 75%, transparent 0); border-radius: 50%; }
   #hitmark.on { animation: hitmark .35s ease-out; }
+  #prompt { position: absolute; left: 50%; bottom: 118px; transform: translateX(-50%); font-size: 15px; font-weight: 700; color: #fff;
+            background: rgba(18, 22, 30, .8); padding: 8px 16px; border-radius: 8px; white-space: nowrap; }
+  #dialoog { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); width: min(600px, 92vw); color: #fff;
+             background: rgba(18, 22, 30, .9); border-radius: 12px; padding: 16px 20px 14px; font-size: 15px; line-height: 1.4; pointer-events: none; }
+  .dialoog-kop { margin-bottom: 8px; } .dialoog-kop b { font-size: 17px; } .dialoog-kop span { opacity: .7; margin-left: 6px; }
+  #dialoog-tekst { white-space: pre-line; min-height: 3em; }
+  #dialoog-opties { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  #dialoog-opties .optie { background: rgba(255, 255, 255, .08); border-radius: 8px; padding: 7px 10px; }
+  #dialoog-opties .optie.klein { padding: 4px 10px; opacity: .8; }
+  #dialoog-opties kbd { font: 12px/1 "Helvetica Neue", Helvetica, Arial, sans-serif; padding: 3px 6px; border-radius: 4px; background: rgba(255, 255, 255, .18); margin-right: 6px; }
+  #dialoog-opties .beloning { display: block; font-size: 12px; opacity: .75; margin: 2px 0 0 30px; }
+  #dialoog-opties p { margin: 4px 0 0 30px; font-size: 13px; opacity: .85; }
+  #logboek { position: absolute; right: 28px; top: 22px; width: min(320px, 80vw); background: rgba(18, 22, 30, .85); color: #fff; border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+  .logboek-kop { font-size: 12px; letter-spacing: .25em; text-transform: uppercase; opacity: .7; margin-bottom: 8px; }
+  #logboek .quest { padding: 6px 8px; border-radius: 6px; margin-bottom: 4px; background: rgba(255, 255, 255, .06); }
+  #logboek .quest.doel { background: rgba(255, 176, 0, .22); }
+  #logboek .quest b { display: block; }
+  #logboek .soort { font-size: 12px; opacity: .75; }
+  #logboek .leeg { font-size: 12px; opacity: .6; margin-top: 4px; }
   @keyframes hitmark { 0% { opacity: 1; transform: scale(1.6); } 100% { opacity: 0; transform: scale(0.8); } }
   #clock { font-variant-numeric: tabular-nums; }
   #biome:empty { display: none; }

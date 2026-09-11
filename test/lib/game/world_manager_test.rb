@@ -132,5 +132,22 @@ module Game
       assert_equal [ "dragon" ], sync[:actors].map { _1[:kind] }
       assert_equal "o:w3", sync[:actors].first[:lair]
     end
+  
+
+    test "quest verbs go to the board and come back on the personal stream; the sync lists the active quests" do
+      m = WorldManager.new("quests", hubs: FakeWorld::HUBS, store: @store, actors: nil, quests: Quests::Board.new(FakeWorld::HUBS.to_h { [ _1.key, _1 ] }, store: MemoryQuestStore.new),
+                           publish: ->(_) {}, publish_to: ->(id, p) { @personal << [ id, p ] }, threaded: false)
+      m.join("p1", "Piet", T)
+      m.moved("p1", 10.0, 0.0, "auto", now: T)
+      m.quest("p1", "talk", T, hub_key: "p:1")
+      dialogue = @personal.last[1]
+      assert_equal [ "p1", "dialogue" ], [ @personal.last[0], dialogue[:type] ]
+      m.quest("p1", "accept", T, hub_key: "p:1", key: dialogue[:offers].first[:key])
+      assert_equal "accepted", @personal.last[1][:action]
+      assert_equal 1, m.join("p1", "Piet", T)[:quests].size
+      m.quest("p1", "heal", T, hub_key: "p:1")
+      m.tick(T + 250)
+      assert @personal.any? { _1[1][:type] == "you" }, "healing refreshes the status"
+    end
   end
 end

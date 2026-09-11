@@ -33,6 +33,12 @@ class GameChannelTest < ActionCable::Channel::TestCase
     assert_nil @manager.world.objects["m:2"]
   end
 
+  test "quest verbs answer on the personal stream" do
+    perform :quest, verb: "talk", hub_key: "p:9"
+    msg = ActiveSupport::JSON.decode(broadcasts("game:test:p:p1").last)
+    assert_equal [ "quest", false, "unknown" ], msg.values_at("type", "ok", "reason")
+  end
+
   test "a refused strike comes back to the asker only" do
     perform :strike, dragon_id: "d1", damage: 60, kind: "fireball"
     assert_equal [ "strike", false, "actors" ], transmissions.last.values_at("type", "ok", "reason")

@@ -1,9 +1,10 @@
 # One room = one stream, plus a personal stream per player for what only they should hear (their hp, gold, quests).
 # Clients send `move` ~10x/second, which the server relays; `hit` reports damage, `fire` shows a trick to the
-# others, `strike` reports a spell hit on a dragon, `teleport` jumps to a discovered hub, `switch` picks a vehicle. The room's Game::WorldManager owns the
+# others, `strike` reports a spell hit on a dragon, `quest` talks to the people at a hub, `teleport` jumps to a
+# discovered hub, `switch` picks a vehicle. The room's Game::WorldManager owns the
 # world; a new subscriber gets the whole state in a `sync`.
 class GameChannel < ApplicationCable::Channel
-  RATES = { "move" => 15, "hit" => 20, "fire" => 10, "strike" => 10, "teleport" => 2, "switch" => 2 }.freeze   # messages per second
+  RATES = { "move" => 15, "hit" => 20, "fire" => 10, "strike" => 10, "teleport" => 2, "switch" => 2, "quest" => 4 }.freeze   # messages per second
   MAX_HITS = 32
 
   def subscribed
@@ -59,6 +60,14 @@ class GameChannel < ApplicationCable::Channel
   def strike(data)
     return unless allowed?("strike")
     answer manager.strike(player_id, data["dragon_id"].to_s.first(8), data["damage"].to_f, data["kind"].to_s.first(16))
+  end
+
+  # data: { verb: talk | accept | abandon | heal, hub_key, npc_id, key }; the answers come on the personal stream
+  # (Action Cable puts the method name in data["action"] on both ends, hence "verb")
+  def quest(data)
+    return unless allowed?("quest")
+    manager.quest(player_id, data["verb"].to_s.first(12), hub_key: data["hub_key"].to_s.first(24).presence,
+                  npc_id: data["npc_id"].to_s.first(32).presence, key: data["key"].to_s.first(80).presence)
   end
 
   # data: { hub_key }: to a hub you have discovered

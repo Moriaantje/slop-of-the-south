@@ -8,6 +8,8 @@ import { updateWater } from "game/Cover"
 import { Avatar } from "game/Avatar"
 import { Spells } from "game/Spells"
 import { Dragons } from "game/Dragons"
+import { Npcs } from "game/Npcs"
+import { Quests } from "game/Quests"
 import { Input } from "game/Input"
 import { Network } from "game/Network"
 import { RemoteCars } from "game/RemoteCars"
@@ -54,7 +56,7 @@ async function main() {
   world.setHeightAt((x, z) => chunks.heightAt(x, z))
   const input   = new Input()
   const assets  = new Assets()                               // glTF models for dragons, the mech and the townsfolk
-  assets.warm(["mech", "dragon"])
+  assets.warm(["mech", "dragon", "npc_a", "npc_b", "npc_c"])
   // the player: a car and a wizard mech, one of them active (T transforms); `car` is the same object, kept under the
   // old name because the camera, the HUD and the network only ever see the active body through it
   const player  = new Avatar({ spawn: config.spawn, spec: vehicleSpec(localStorage.getItem("voertuig") ?? "trike"), scene: world.scene, assets,
@@ -99,6 +101,9 @@ async function main() {
 
   // the dragons: drawn from the server's `actors` messages; the spells aim at them and report hits
   let dragons = null
+  // the people at the hubs and the quests they hand out
+  const npcs = new Npcs({ scene: world.scene, assets, hubs, heightAt: (x, z) => chunks.heightAt(x, z) })
+  let quests = null
   // the session: who you are in the world, and what the server decides about you
   const session = new Session(playerId, { actie: el("actie"), banner: el("banner"), bannerTitel: el("banner-titel"), bannerSub: el("banner-sub"), flits: el("flits"), status: el("status") }, {
     onSync: (msg) => {
@@ -125,14 +130,20 @@ async function main() {
     onHeal: () => { chunks.reload(); index.resetState(); combat.reset() },
     onActors: (list, now) => dragons?.receive(list, now),
     onStrike: (msg) => dragons?.strike(msg),
+    onDialogue: (msg) => quests?.receiveDialogue(msg),
+    onQuest: (msg) => quests?.receiveQuest(msg),
+    onQuests: (list) => quests?.setAll(list),
   })
+  quests = new Quests({ els: { dialoog: el("dialoog"), dialoogNaam: el("dialoog-naam"), dialoogRol: el("dialoog-rol"), dialoogTekst: el("dialoog-tekst"), dialoogOpties: el("dialoog-opties"), log: el("logboek"), logLijst: el("logboek-lijst") },
+    session, send: (a, d) => net.send(a, d), scene: world.scene, heightAt: (x, z) => chunks.heightAt(x, z), npcs })
+  const promptEl = el("prompt")
   const doelwitEl = el("doelwit"), doelwitNaam = el("doelwit-naam"), doelwitBar = el("doelwit-bar"), hitmarkEl = el("hitmark")
   dragons = new Dragons({ scene: world.scene, assets, effects, session, send: (a, d) => net.send(a, d), heightAt: (x, z) => chunks.heightAt(x, z),
     hud: { hit: () => { hitmarkEl.classList.remove("on"); void hitmarkEl.offsetWidth; hitmarkEl.classList.add("on") } } })
   spells.targets = (x, z, yaw) => dragons.nearest(x, z, yaw)
   spells.onStrike = (target, kind) => dragons.struck(target, kind)
   combat.onStrike = (target, kind) => dragons.struck(target, kind)
-  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, player, spells, dragons, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
+  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, player, spells, dragons, npcs, quests, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
@@ -165,7 +176,7 @@ async function main() {
 
   const kmh = el("kmh"), playersEl = el("players"), clockEl = el("clock"), cooldownBar = el("cooldown-bar")
   const boostFill = el("boost-fill"), driftEl = el("drift"), pipsEl = el("drift-pips")
-  let shownLevel = -1, shownDrift = null, lastKmh = -1, lastMeter = -1, lastBoostOn = null, lastCooldown = -1   // DOM writes only on change
+  let shownLevel = -1, shownDrift = null, lastKmh = -1, lastMeter = -1, lastBoostOn = null, lastCooldown = -1, lastPrompt = null   // DOM writes only on change
   const onPickup = (p) => {
     car.addBoost(TUNING.boost.pickupFill, TUNING.boost.pickupBurst)
     effects.flash(p.x, p.y + 0.6, p.z, 1.6); effects.shake(0.04)
@@ -188,9 +199,11 @@ async function main() {
     car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)
     updateWater(dayNight.env, timer.getElapsed())
     if (input.toggleMap) minimap.toggle()
-    if (input.pick) picker.show(car.spec.id, true)
-    const digit = input.digit
-    if (digit) picker.digit(digit)
+    if (!quests.handleInput(input)) {                             // a dialogue takes the digits and Esc first
+      if (input.pick) picker.show(car.spec.id, true)
+      const digit = input.digit
+      if (digit) picker.digit(digit)
+    }
     if (chunks.ready(car.x, car.z)) {
       if (input.reset) { car.reset(config.spawn); placed = false }
       if (!placed) {
@@ -207,6 +220,7 @@ async function main() {
       player.integrate(dt, input)
       if (player.vy === null) combat.collide(player, dt)          // airborne bodies clear everything
       player.settle(heightAt)
+      if (npcs.near && input.talk) { npcs.talkTo(npcs.near); net.send("quest", { verb: "talk", hub_key: npcs.near.hubKey, npc_id: npcs.near.id }) }   // E talks before it fires
       combat.abilities(player, input, dt)                         // the car's trick on E; a landing mech stomps
       spells.update(player, input, dt)                            // the mech's Q and F
       if (player.mode === "car") carFx.update(player.car, dt)
@@ -239,6 +253,10 @@ async function main() {
     effects.update(dt, world.camera)
     remotes.update(car, world.camera)
     dragons.update(car, world.camera, dt, darkness)
+    npcs.update(car, world.camera, dt, darkness)
+    quests.update(car, world.camera, dt)
+    const prompt = quests.open ? null : npcs.prompt
+    if (prompt !== lastPrompt) { lastPrompt = prompt; promptEl.hidden = !prompt; promptEl.textContent = prompt ?? "" }
     if (loading.open && placed && chunks.readyFraction(car.x, car.z) >= 1) loading.hide()
 
     netTimer += dt
@@ -262,6 +280,7 @@ async function main() {
       doelwitEl.hidden = !aimed
       if (aimed) { doelwitNaam.textContent = aimed.name; doelwitBar.style.transform = `scaleX(${Math.max(0, aimed.hp / aimed.max)})` }
     }
+    overlay.objective = quests.objective
     minimap.update(car, remotes, overlay)
 
     const shownKmh = Math.round(Math.hypot(car.vx, car.vz) * 3.6)
