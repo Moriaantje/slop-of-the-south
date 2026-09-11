@@ -8,6 +8,10 @@ export const DAY_SECONDS = 720
 const SKY_DISTANCE = 3200                                    // inside the camera's far plane, beyond the loaded tiles
 
 const DAY_SKY = new THREE.Color(0x9fb8cf), DUSK_SKY = new THREE.Color(0xe39a6c), NIGHT_SKY = new THREE.Color(0x0a0f1d)
+// sky dome palette: zenith / horizon by phase, plus the glow banked around the sun at dawn and dusk
+const DAY_ZENITH = new THREE.Color(0x4f8fd2), DAY_HORIZON = new THREE.Color(0xbfd4e6)
+const DUSK_ZENITH = new THREE.Color(0x22305e), DUSK_HORIZON = new THREE.Color(0xf2a868), DUSK_GLOW = new THREE.Color(0xff6a28)
+const NIGHT_ZENITH = new THREE.Color(0x03050f), NIGHT_HORIZON = new THREE.Color(0x0e1729)
 const DAY_HEMI = new THREE.Color(0xdfe9f3), NIGHT_HEMI = new THREE.Color(0x2a3552)
 const DAY_GROUND = new THREE.Color(0x5b6b4a), NIGHT_GROUND = new THREE.Color(0x0b0d12)
 const SUN_DAY = new THREE.Color(0xfff2dc), SUN_LOW = new THREE.Color(0xffb070), MOON = new THREE.Color(0x9fb4ff)
@@ -28,6 +32,15 @@ export class DayNight {
     this.moonSprite.scale.setScalar(SKY_DISTANCE * 0.07)
     this.sunSprite.renderOrder = this.moonSprite.renderOrder = -1
     world.scene.add(this.sunSprite, this.moonSprite)
+    // the sky: a dome around the camera shaded from horizon to zenith, with the dusk glow and the stars
+    this.sky = new THREE.Mesh(new THREE.SphereGeometry(SKY_DISTANCE * 1.1, 32, 16), new THREE.ShaderMaterial({
+      uniforms: { zenith: { value: new THREE.Color() }, horizon: { value: new THREE.Color() }, glow: { value: DUSK_GLOW.clone() },
+                  sunDir: { value: new THREE.Vector3(1, 0, 0) }, glowStrength: { value: 0 }, stars: { value: 0 } },
+      vertexShader: SKY_VERTEX, fragmentShader: SKY_FRAGMENT, side: THREE.BackSide, depthWrite: false, fog: false
+    }))
+    this.sky.renderOrder = -10
+    this.sky.frustumCulled = false
+    world.scene.add(this.sky)
   }
 
   // game hours 0..24
@@ -51,7 +64,12 @@ export class DayNight {
 
     this._sky.copy(NIGHT_SKY).lerp(DAY_SKY, daylight).lerp(DUSK_SKY, dusk * 0.5)
     w.scene.background.copy(this._sky)
-    w.scene.fog.color.copy(this._sky)
+    const u = this.sky.material.uniforms
+    u.zenith.value.copy(NIGHT_ZENITH).lerp(DAY_ZENITH, daylight).lerp(DUSK_ZENITH, dusk)
+    u.horizon.value.copy(NIGHT_HORIZON).lerp(DAY_HORIZON, daylight).lerp(DUSK_HORIZON, dusk)
+    u.glowStrength.value = dusk * 1.3
+    u.stars.value = smoothstep(0.16, 0.42, -elev)              // stars only once the sun is well below the horizon
+    w.scene.fog.color.copy(u.horizon.value)                     // the ground fades into the horizon, not into a flat sky
     w.scene.fog.near = 600 - 300 * (1 - daylight); w.scene.fog.far = 2200 - 900 * (1 - daylight)
 
     // the sun: east at sunrise, high in the south at noon, west at sunset; at night a faint moon from the other side
@@ -66,6 +84,8 @@ export class DayNight {
     const sunAlt = THREE.MathUtils.degToRad(2 + 16 * elev)
     this._dir.set(Math.cos(a), 0, Math.sin(a) * 0.5 + 0.13).normalize().multiplyScalar(Math.cos(sunAlt)).setY(Math.sin(sunAlt))
     this.sunSprite.position.copy(cam).addScaledVector(this._dir, SKY_DISTANCE)
+    u.sunDir.value.copy(this._dir)
+    this.sky.position.copy(cam)
     this.sunSprite.material.opacity = smoothstep(-0.03, 0.06, elev)
     this.sunSprite.material.color.copy(this._c.copy(SUN_DAY).lerp(SUN_LOW, dusk))
     // moon: opposite the sun, up all night, gone by day
@@ -84,6 +104,38 @@ export class DayNight {
     return this.darkness
   }
 }
+
+const SKY_VERTEX = /* glsl */`
+  varying vec3 vDir;
+  void main() {
+    vDir = (modelMatrix * vec4(position, 1.0)).xyz - cameraPosition;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }`
+const SKY_FRAGMENT = /* glsl */`
+  uniform vec3 zenith, horizon, glow, sunDir;
+  uniform float glowStrength, stars;
+  varying vec3 vDir;
+  float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+  void main() {
+    vec3 d = normalize(vDir);
+    float h = clamp(d.y, 0.0, 1.0);
+    vec3 col = mix(horizon, zenith, pow(h, 0.42));
+    // dawn/dusk: a warm band along the horizon, strongest towards the sun
+    float toSun = max(dot(normalize(vec3(d.x, 0.0, d.z)), normalize(vec3(sunDir.x, 0.0, sunDir.z))), 0.0);
+    col += glow * glowStrength * exp(-h * 7.0) * (0.15 + 0.85 * pow(toSun, 4.0));
+    col += glow * glowStrength * 0.35 * exp(-h * 2.5) * pow(toSun, 12.0);
+    if (d.y < 0.0) col = horizon;
+    // stars: a sparse hash on the direction; each lit cell holds one soft dot, fading out towards the horizon
+    vec3 cell = floor(d * 420.0);
+    float r = hash(cell);
+    vec3 f = fract(d * 420.0) - 0.5;
+    float dot_ = smoothstep(0.28, 0.05, length(f + (vec3(hash(cell + 3.0), hash(cell + 5.0), hash(cell + 7.0)) - 0.5) * 0.4));
+    float star = step(0.9985, r) * dot_ * (0.45 + 0.55 * hash(cell + 1.0)) * smoothstep(0.02, 0.22, d.y);
+    col += mix(vec3(1.0), vec3(0.8, 0.9, 1.0), hash(cell + 9.0)) * star * stars * 1.5;
+    gl_FragColor = vec4(col, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }`
 
 // sun: white core with a warm halo (additive); moon: pale disc with a few maria and a faint glow
 function discTexture(kind) {

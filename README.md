@@ -80,7 +80,9 @@ Tiles are static JSON served by nginx/Rails' static file server — no DB hit wh
 
 A full day takes 12 real minutes (`game/DayNight.js`, `DAY_SECONDS`), on the wall clock so every player sees the same
 time; the HUD shows the game clock. Sunrise 06:00, noon 12:00, sunset 18:00, twilight until about 19:00. The sun
-light swings east → south → west and gives way to a faint moon; sky, fog and hemisphere light darken with it. The
+light swings east → south → west and gives way to a faint moon; sky, fog and hemisphere light darken with it. The sky
+is a shaded dome around the camera (horizon → zenith gradient per phase, a glow banked around the sun at dawn and
+dusk, stars once the sun is well below the horizon); the fog takes the horizon colour so the land fades into it. The
 sun and the moon are visible as sprites far out along their compass directions on a flattened arc (2°–18° up, since
 the chase camera only sees ~22° above the horizon); the sun reddens and fades at the horizon, the moon rises low in
 the opposite sky as the sun sets. Face them to see them: east in the morning, south at midday, west in the afternoon. A
