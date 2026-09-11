@@ -122,9 +122,11 @@ export function noiseTexture() {
 // roughness that varies with the noise so surfaces catch the sky unevenly (wet-look patches on asphalt), and for
 // walls a grime band at the foot plus damp moss creeping up the shaded faces — the dirt that every real wall has.
 export function weathered(m, { walls = false, wet = 0.35 } = {}) {
-  const prev = m.onBeforeCompile
+  // both of these may be three's own prototype methods, which read `this`: bind before wrapping
+  const prev = m.onBeforeCompile.bind(m)
+  const prevKey = m.customProgramCacheKey.bind(m)
   m.onBeforeCompile = (shader) => {
-    prev?.(shader)
+    prev(shader)
     shader.uniforms.uNoise = { value: noiseTexture() }
     shader.uniforms.uWet = { value: wet }
     shader.vertexShader = shader.vertexShader
@@ -147,7 +149,6 @@ ${walls ? `\t{
 \t}` : ""}`)
       .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\n\troughnessFactor = clamp(roughnessFactor - uWet * smoothstep(0.55, 0.8, wxNoise), 0.05, 1.0);")
   }
-  const key = m.customProgramCacheKey
-  m.customProgramCacheKey = () => (key ? key() : "") + (walls ? "|weathered-wall" : "|weathered")
+  m.customProgramCacheKey = () => prevKey() + (walls ? "|weathered-wall" : "|weathered")
   return m
 }
