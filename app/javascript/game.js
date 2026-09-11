@@ -17,6 +17,9 @@ import { Carrier } from "game/Carrier"
 import { Destructibles } from "game/Destructibles"
 import { Combat } from "game/Combat"
 import { Effects } from "game/Effects"
+import { VehicleFx } from "game/VehicleFx"
+import { Pickups } from "game/Pickups"
+import { TUNING } from "game/Tuning"
 
 async function main() {
   const config = await (await fetch("/api/world")).json()
@@ -35,12 +38,15 @@ async function main() {
   const world   = new World(container)
   const effects = new Effects(world.scene)
   const index   = new Destructibles(effects)                // every object a player can flatten, in a grid
-  const chunks  = new ChunkManager(world.scene, config, { onTile: (t) => index.indexTile(t), onDrop: (t) => index.dropTile(t) })
+  const pickups = new Pickups()                             // boost pads, placed per tile from its roads
+  const chunks  = new ChunkManager(world.scene, config, { onTile: (t) => { index.indexTile(t); pickups.addTile(t) }, onDrop: (t) => { index.dropTile(t); pickups.dropTile(t) } })
   index.heightAt = (x, z) => chunks.heightAt(x, z)
+  world.setHeightAt((x, z) => chunks.heightAt(x, z))
   const combat  = new Combat({ index, effects, send: (action, data) => net.send(action, data) })
   const input   = new Input()
   const car     = new Vehicle(config.spawn)
-  const remotes = new RemoteCars(world.scene)
+  const carFx   = new VehicleFx(car.mesh, effects.smoke)
+  const remotes = new RemoteCars(world.scene, effects.smoke)
   const dayNight = new DayNight(world)
   const carrier = new Carrier(world.scene)
   const burnEl = el("burn")
@@ -61,7 +67,7 @@ async function main() {
     onEnd: (msg) => { carrier.hide(); combat.enabled = false; if (msg.result === "lost") index.cosmeticWipe(msg.x, msg.z, 300) },
     onAction: (msg) => { if (msg.type === "teleport") teleport(msg.x, msg.z) },
   })
-  window.slop = { world, dayNight, car, remotes, chunks, round, carrier, index, combat, effects }     // for poking at the scene from the console
+  window.slop = { world, dayNight, car, remotes, chunks, round, carrier, index, combat, effects, pickups, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
@@ -86,9 +92,17 @@ async function main() {
   let lastInside = null       // last position inside the border, to fall back to after burning
 
   const kmh = el("kmh"), playersEl = el("players"), clockEl = el("clock")
+  const boostEl = el("boost"), boostFill = el("boost-fill"), driftEl = el("drift"), pipsEl = el("drift-pips")
+  let shownLevel = -1, shownDrift = null
+  const onPickup = (p) => {
+    car.addBoost(TUNING.boost.pickupFill, TUNING.boost.pickupBurst)
+    effects.flash(p.x, p.y + 0.6, p.z, 1.6); effects.shake(0.04)
+    boostEl.classList.add("pop"); setTimeout(() => boostEl.classList.remove("pop"), 200)
+  }
   const signEl = el("sign"), streetEl = el("sign-street"), districtEl = el("sign-district"), placeEl = el("sign-place"), biomeEl = el("biome")
   const timer = new THREE.Timer()
   let netTimer = 0, signTimer = 0, borderTimer = 0
+  const heightAt = (x, z) => chunks.heightAt(x, z), tileIndex = (x, z) => chunks.tileIndex(x, z)
 
   function frame(now) {
     timer.update(now)
@@ -116,8 +130,11 @@ async function main() {
       car.integrate(dt, input)
       combat.enabled = round.running
       combat.collide(car, dt)
-      car.settle((x, z) => chunks.heightAt(x, z))
+      car.settle(heightAt)
+      carFx.update(car, dt)
+      pickups.collect(car, tileIndex, onPickup)
     }
+    pickups.update(dt)
     // the edge of the world: cross the province border and you burn back to where you were
     if (wall) {
       wall.update(timer.getElapsed())
@@ -156,7 +173,16 @@ async function main() {
     }
     minimap.update(car, remotes, round)
 
-    kmh.textContent = Math.round(Math.abs(car.speed) * 3.6)
+    kmh.textContent = Math.round(Math.hypot(car.vx, car.vz) * 3.6)
+    boostFill.style.transform = `scaleX(${car.boostMeter.toFixed(3)})`
+    boostEl.classList.toggle("on", car.boostPower > 0.3)
+    const driftShown = car.drifting && !car.driftMild
+    if (driftShown !== shownDrift) { shownDrift = driftShown; driftEl.hidden = !driftShown }
+    if (driftShown && car.chargeLevel !== shownLevel) {
+      shownLevel = car.chargeLevel
+      pipsEl.textContent = "●".repeat(shownLevel) + "○".repeat(3 - shownLevel)
+      driftEl.classList.toggle("l3", shownLevel === 3)
+    }
     playersEl.textContent = remotes.count ? `${remotes.count} andere ${remotes.count === 1 ? "chauffeur" : "chauffeurs"} online` : ""
 
     world.render()

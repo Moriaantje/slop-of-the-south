@@ -1,17 +1,24 @@
 # Procedural road geometry for one tile.
 #
 # Roads are OSM centrelines. For each road within the tile (plus a margin) the terrain is sampled along the way,
-# smoothed, pinned at junction nodes (so meeting roads share a height), and clamped so it never dips below the
-# terrain; bridges keep their smoothed line and float. Ribbons are cut back where three or more roads meet and a
-# plain junction patch covers the crossing, so lane markings stop short of it. Finally the terrain samples of the
-# tile are deformed to the road bed (cut or embankment), which seats roads in the landscape.
+# smoothed, pinned at junction nodes (so meeting roads share a height), and clamped so it stays within a small cut
+# below / a limited fill above the terrain; bridges keep their smoothed line and float. Ribbons are cut back where
+# three or more roads meet and a plain junction patch covers the crossing, so lane markings stop short of it. Finally
+# the terrain samples of the tile are deformed: the road bed is the road surface level, a verge band beside it sits a
+# curb higher, and the terrain blends back to nature over the shoulder. The height on the wire IS the road surface;
+# the client lifts its ribbons by a few cm only to avoid z-fighting.
 class RoadBuilder
   MARGIN = 250          # metres beyond the tile: roads and junctions here influence the tile's roads and terrain
   STEP = 8.0            # resampling distance along a road
-  WINDOW = 60.0         # box-filter window for the height profile
-  LIFT = 0.15           # ribbon above the (deformed) terrain
-  SHOULDER = 6.0        # metres beside the road over which the terrain blends back to nature
-  KINDS_WITHOUT_TERRAIN_WORK = %w[cycleway track].freeze
+  WINDOW = { major: 60.0, minor: 30.0 }.freeze   # box-filter window for the height profile (majors get it twice)
+  CURB = 0.12           # verge / sidewalk level above the road surface
+  VERGE = 2.5           # metres beside the bed held at road + CURB (the sidewalk strip)
+  SHOULDER = 6.0        # metres beyond the verge over which the terrain blends back to nature
+  CUT_LIMIT = 0.25      # a road may sink at most this far below the terrain (buildings use the raw DEM)
+  FILL_LIMIT = { major: 6.0, minor: 1.5, path: 0.4 }.freeze   # …and rise at most this far above it, bridges excepted
+  MAJOR = %w[motorway motorway_link trunk trunk_link primary primary_link].freeze
+  PATHS = %w[cycleway track].freeze
+  KINDS_WITHOUT_TERRAIN_WORK = PATHS   # narrow paths do not terrace the fields; their ribbons follow the terrain client-side
 
   RoadRow = Struct.new(:id, :kind, :name, :width, :lanes, :surface, :oneway, :bridge, :tunnel, :pts)   # pts: [[x, y], …] RD
 
@@ -27,19 +34,25 @@ class RoadBuilder
     crossings = water_crossings(x0 - MARGIN, y0 - MARGIN, x1 + MARGIN, y1 + MARGIN)
     profiles = rows.reject(&:tunnel).map { |r| [ r, profile(r) ] }
     nodes = junction_nodes(profiles)
+    profiles.each { |road, prof| bridges!(road, prof, crossings[road.id]) }   # before pinning: bridge samples escape the clamp
     pin!(profiles, nodes)
-    profiles.each { |road, prof| bridges!(road, prof, crossings[road.id]) }
     profiles.each_with_index { |(_, prof), ri| decks!(ri, prof, profiles, nodes) }
     pieces = profiles.flat_map { |road, prof| cut_at_junctions(road, prof, nodes) }
     {
       roads: pieces.filter_map { |road, pts| clip(road, pts, x0, y0, x1, y1) },
       junctions: nodes.values.select { |n| n[:degree] >= 3 && n[:x].between?(x0, x1) && n[:y].between?(y0, y1) }
                       .map { |n| gx, gz = World.to_game(n[:x], n[:y]); [ gx.round(2), gz.round(2), n[:h].round(2), n[:r].round(2) ] },
-      deform: deformer(pieces)
+      deform: deformer(pieces, nodes)
     }
   end
 
   private
+
+  def klass(road)
+    return :major if MAJOR.include?(road.kind)
+    return :path if PATHS.include?(road.kind)
+    :minor
+  end
 
   def fetch(x0, y0, x1, y1)
     env = "ST_MakeEnvelope(#{x0}, #{y0}, #{x1}, #{y1}, 28992)"
@@ -62,19 +75,20 @@ class RoadBuilder
     end
     pts << road.pts.last
     terrain = pts.map { |x, y| @heights.sample(x, y) }
-    smooth = box_filter(box_filter(terrain))
+    smooth = klass(road) == :major ? box_filter(box_filter(terrain, WINDOW[:major]), WINDOW[:major]) : box_filter(terrain, WINDOW[:minor])
     pts.each_with_index.map { |(x, y), i| [ x, y, terrain[i], smooth[i], false ] }
   end
 
-  def box_filter(values)
-    half = (WINDOW / STEP / 2).ceil
+  def box_filter(values, window)
+    half = (window / STEP / 2).ceil
     values.each_index.map do |i|
       lo, hi = [ i - half, 0 ].max, [ i + half, values.size - 1 ].min
       values[lo..hi].sum / (hi - lo + 1)
     end
   end
 
-  # nodes shared by two or more roads (by coordinate, cm precision): height = max(terrain, mean of the roads' profiles)
+  # nodes shared by two or more roads (by coordinate, cm precision): height = mean of the roads' profiles, kept within
+  # the cut/fill limits of the most terrain-bound road there so every ribbon can meet the junction patch
   def junction_nodes(profiles)
     hits = Hash.new { |h, k| h[k] = [] }
     profiles.each_with_index do |(road, prof), ri|
@@ -86,7 +100,11 @@ class RoadBuilder
       x, y = list.first[1], list.first[2]
       heights = list.map { |ri, _, _| p = profiles[ri][1].find { |px, py, _, _, _| (px - x).abs < 0.005 && (py - y).abs < 0.005 }; p && p[3] }.compact
       widths = roads_here.map { |ri| profiles[ri][0].width }
-      nodes[key] = { x: x, y: y, degree: list.size, h: [ @heights.sample(x, y) + LIFT, heights.sum / heights.size ].max, r: widths.max * 0.5 + 1.0, roads: roads_here }
+      terrain = @heights.sample(x, y)
+      fill = roads_here.map { |ri| FILL_LIMIT[klass(profiles[ri][0])] }.min
+      h = heights.empty? ? terrain : heights.sum / heights.size
+      h = h.clamp(terrain - CUT_LIMIT, terrain + fill) unless roads_here.all? { |ri| profiles[ri][0].bridge }
+      nodes[key] = { x: x, y: y, degree: list.size, h: h, r: widths.max * 0.5 + 1.0, roads: roads_here }
     end
   end
 
@@ -192,16 +210,18 @@ class RoadBuilder
   end
 
   # correct each profile so junction vertices hit the node height, blending the correction between pins and
-  # fading it out 100 m past the outer pins; then keep the road above the terrain (bridges excepted)
+  # fading it out 100 m past the outer pins; then keep the road within CUT_LIMIT below / FILL_LIMIT above the
+  # terrain (bridge samples excepted). Node heights already satisfy the clamp, so pinned vertices stay shared.
   def pin!(profiles, nodes)
     profiles.each do |road, prof|
+      fill = FILL_LIMIT[klass(road)]
       pins = prof.each_index.select { |i| nodes.key?([ (prof[i][0] * 100).round, (prof[i][1] * 100).round ]) }
       deltas = pins.to_h { |i| [ i, nodes[[ (prof[i][0] * 100).round, (prof[i][1] * 100).round ]][:h] - prof[i][3] ] }
       pins.each { |i| prof[i][4] = true }
       prof.each_index do |i|
         c = correction(i, pins, deltas)
         h = prof[i][3] + c
-        h = [ h, prof[i][2] + LIFT ].max unless road.bridge
+        h = h.clamp(prof[i][2] - CUT_LIMIT, prof[i][2] + fill) unless road.bridge || prof[i][5]
         prof[i][3] = h
       end
     end
@@ -297,38 +317,51 @@ class RoadBuilder
     [ lerp.call(t0), lerp.call(t1) ]
   end
 
-  # returns a lambda (x, y, terrain_h) → deformed height: the terrain becomes the road bed under and beside roads
-  def deformer(pieces)
+  # returns a lambda (x, y, terrain_h) → deformed height: under and beside roads the terrain becomes the road bed
+  # (at the road surface level), then a verge a curb higher, then blends back to nature over the shoulder.
+  # The bed half-width is at least half a height step so every road gets at least one bed sample per side — a 10 m
+  # grid cannot follow a 3 m cut, and a ribbon whose bracketing samples are both on the verge would be buried.
+  # Junction nodes get their own seat: the pieces were cut back by the node radius, so without it the patch would
+  # end up on the verge.
+  def deformer(pieces, nodes)
     segments = []
     pieces.each do |road, pts|
       next if KINDS_WITHOUT_TERRAIN_WORK.include?(road.kind)
-      hw = road.width / 2 + 0.5
+      hw = [ road.width / 2 + 0.5, World::HEIGHT_STEP / 2.0 ].max
       pts.each_cons(2) { |a, b| segments << [ a, b, hw ] unless a[3] == 1 && b[3] == 1 }   # bridge decks don't touch the ground
+    end
+    nodes.each_value do |n|
+      next unless n[:degree] >= 3
+      p = [ n[:x], n[:y], n[:h] ]
+      segments << [ p, p, [ n[:r] + 0.5, World::HEIGHT_STEP / 2.0 ].max ]
     end
     grid = Hash.new { |h, k| h[k] = [] }
     cell = 50.0
+    pad = segments.map { _1[2] }.max.to_f + VERGE + SHOULDER + 1
     segments.each do |seg|
       xs = [ seg[0][0], seg[1][0] ]; ys = [ seg[0][1], seg[1][1] ]
-      ((xs.min - 12) / cell).floor.upto(((xs.max + 12) / cell).floor) do |cx|
-        ((ys.min - 12) / cell).floor.upto(((ys.max + 12) / cell).floor) { |cy| grid[[ cx, cy ]] << seg }
+      ((xs.min - pad) / cell).floor.upto(((xs.max + pad) / cell).floor) do |cx|
+        ((ys.min - pad) / cell).floor.upto(((ys.max + pad) / cell).floor) { |cy| grid[[ cx, cy ]] << seg }
       end
     end
     lambda do |x, y, h|
-      best_d, best_h, best_hw = Float::INFINITY, nil, nil
+      best_d, best_h = Float::INFINITY, nil
       grid[[ (x / cell).floor, (y / cell).floor ]].each do |a, b, hw|
         dx, dy = b[0] - a[0], b[1] - a[1]
         len2 = dx * dx + dy * dy
         t = len2.zero? ? 0.0 : (((x - a[0]) * dx + (y - a[1]) * dy) / len2).clamp(0.0, 1.0)
         px, py = a[0] + dx * t, a[1] + dy * t
-        d = Math.hypot(px - x, py - y)
+        d = Math.hypot(px - x, py - y) - hw           # distance outside the bed (negative inside)
         next unless d < best_d
-        best_d, best_h, best_hw = d, a[2] + (b[2] - a[2]) * t, hw
+        best_d, best_h = d, a[2] + (b[2] - a[2]) * t
       end
       return h unless best_h
-      bed = best_h - LIFT
-      return bed if best_d <= best_hw
-      blend = (best_d - best_hw) / SHOULDER
-      blend >= 1 ? h : bed + (h - bed) * blend
+      bed = best_h
+      return bed if best_d <= 0
+      verge = bed + CURB
+      return verge if best_d <= VERGE
+      blend = (best_d - VERGE) / SHOULDER
+      blend >= 1 ? h : verge + (h - verge) * blend
     end
   end
 end

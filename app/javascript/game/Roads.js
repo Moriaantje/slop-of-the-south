@@ -1,13 +1,18 @@
 import * as THREE from "three"
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js"
 
-// Procedural roads. Tile entries carry ready-made 3D centrelines (RoadBuilder: smoothed, junction-pinned, above the
-// terrain) as pts [x, z, y]. Each road becomes a flat ribbon with a style chosen from its class, width, surface and
+// Procedural roads. Tile entries carry ready-made 3D centrelines (RoadBuilder: smoothed, junction-pinned, seated in
+// the terrain) as pts [x, z, y] where y IS the road surface level; the terrain bed under a road is at that level and
+// the verge beside it a curb higher. Each road becomes a flat ribbon lifted ROAD_LIFT (a z-fighting epsilon) above
+// the higher of its own level and the terrain under each vertex — the 10 m height grid smears the curb step across the
+// ribbon edge, so ribbons follow the terrain wherever it pokes above them. Style comes from class, width, surface and
 // whether the tile is built-up: procedural textures provide asphalt, klinkers, gravel, red cycle asphalt and the lane
-// markings (edge lines, centre dashes, lane dashes); town streets get raised sidewalks. Junctions (three or more
-// roads) are covered by a plain patch so markings stop short of the crossing. Bridges get parapets and pillars.
-export const ROAD_LIFT = 0.15
-const LIFT = ROAD_LIFT, TEX_LEN = 24, SIDEWALK = 1.7, CURB = 0.12
+// markings (edge lines, centre dashes, lane dashes); town streets get raised sidewalks a CURB above the road.
+// Junctions (three or more roads) are covered by a plain patch so markings stop short of the crossing. Bridges get
+// parapets and pillars.
+export const ROAD_LIFT = 0.05
+export const CURB = 0.12
+const LIFT = ROAD_LIFT, TEX_LEN = 24, SIDEWALK = 1.7
 const URBAN = new Set(["stad", "woonwijk", "dorp"])
 
 const textures = {}
@@ -67,15 +72,16 @@ function styleOf(road, urban) {
 // raised sidewalks along neighbourhood streets in built-up tiles; through roads have their own BGT footways and cycle paths
 const sidewalks = (road, urban) => urban && !road.oneway && ["residential", "living_street", "unclassified"].includes(road.kind)
 
-export function buildRoads(roads, junctions, biome) {
+// terrainAt(x, z) is the tile's terrain height; ribbons and patches never sink below it
+export function buildRoads(roads, junctions, biome, terrainAt = null) {
   const urban = URBAN.has(biome)
   const byMat = new Map()
   const add = (mat, geo) => { if (!byMat.has(mat)) byMat.set(mat, []); byMat.get(mat).push(geo) }
   for (const road of roads) {
     if (road.pts.length < 2) continue
-    add(material(styleOf(road, urban)), ribbon(road.pts, road.width / 2, LIFT, true))
+    add(material(styleOf(road, urban)), ribbon(road.pts, road.width / 2, LIFT, true, 0, null, terrainAt))
     if (sidewalks(road, urban)) {
-      for (const side of [-1, 1]) add(material("pavers"), ribbon(road.pts, SIDEWALK / 2, LIFT + CURB, true, side * (road.width / 2 + SIDEWALK / 2)))
+      for (const side of [-1, 1]) add(material("pavers"), ribbon(road.pts, SIDEWALK / 2, LIFT + CURB, true, side * (road.width / 2 + SIDEWALK / 2), null, terrainAt))
     }
     for (const span of bridgeRuns(road.pts)) {
       for (const side of [-1, 1]) add(concrete, ribbon(span, 0.15, LIFT + 0.9, false, side * (road.width / 2 + 0.15), LIFT))
@@ -84,7 +90,9 @@ export function buildRoads(roads, junctions, biome) {
   }
   for (const [x, z, y, r] of junctions ?? []) {
     const g = new THREE.CircleGeometry(r, 16).toNonIndexed()
-    g.rotateX(-Math.PI / 2); g.translate(x, y + LIFT + 0.01, z)   // level with the ribbons, not the terrain bed
+    g.rotateX(-Math.PI / 2); g.translate(x, 0, z)
+    const pos = g.attributes.position                            // level with the ribbons, riding up over any terrain that pokes through
+    for (let i = 0; i < pos.count; i++) pos.setY(i, Math.max(y, terrainAt ? terrainAt(pos.getX(i), pos.getZ(i)) : y) + LIFT + 0.01)
     g.deleteAttribute("normal")                 // ribbons carry position + uv only; normals are computed after merging
     g.deleteAttribute("uv"); g.setAttribute("uv", new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2).fill(0.5), 2))
     add(junctionMat, g)
@@ -101,21 +109,37 @@ export function buildRoads(roads, junctions, biome) {
 }
 
 // A flat ribbon along pts ([x, z, y]) of half-width hw, lifted by `lift`, shifted sideways by `offset` metres.
-// When `bottom` is given a vertical wall from bottom to lift is built instead (bridge parapets).
-function ribbon(pts, hw, lift, textured, offset = 0, bottom = null) {
+// When `bottom` is given a vertical wall from bottom to lift is built instead (bridge parapets). With `ground`
+// (terrain height function) each edge vertex is raised to ROAD_LIFT above the highest terrain at the vertex and
+// halfway to its neighbours, so the bilinear terrain never pokes through the ribbon between two vertices.
+function ribbon(pts, hw, lift, textured, offset = 0, bottom = null, ground = null) {
   const verts = [], uvs = [], idx = []
-  let along = 0
+  const edges = []                                            // [leftX, leftZ, rightX, rightZ] per point
   for (let i = 0; i < pts.length; i++) {
-    const [x, z, y] = pts[i]
+    const [x, z] = pts[i]
     const [px, pz] = pts[Math.max(i - 1, 0)], [nx, nz] = pts[Math.min(i + 1, pts.length - 1)]
     let dx = nx - px, dz = nz - pz
     const len = Math.hypot(dx, dz) || 1
     dx /= len; dz /= len
     const lx = -dz, lz = dx                                   // left-hand unit vector
-    if (i > 0) along += Math.hypot(x - pts[i - 1][0], z - pts[i - 1][2])
     const cx = x + lx * offset, cz = z + lz * offset
+    edges.push([cx + lx * hw, cz + lz * hw, cx - lx * hw, cz - lz * hw, cx, cz])
+  }
+  const floor = (i, k) => {                                   // highest terrain at edge vertex k (0 left, 2 right) of point i and towards its neighbours
+    const [ex, ez] = [edges[i][k], edges[i][k + 1]]
+    let t = ground(ex, ez)
+    for (const j of [i - 1, i + 1]) if (edges[j]) t = Math.max(t, ground((ex + edges[j][k]) / 2, (ez + edges[j][k + 1]) / 2))
+    return t
+  }
+  let along = 0
+  for (let i = 0; i < pts.length; i++) {
+    const y = pts[i][2]
+    if (i > 0) along += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][2] - pts[i - 1][2])
+    const [lxp, lzp, rxp, rzp, cx, cz] = edges[i]
     if (bottom === null) {
-      verts.push(cx + lx * hw, y + lift, cz + lz * hw, cx - lx * hw, y + lift, cz - lz * hw)
+      const yl = ground ? Math.max(y + lift, floor(i, 0) + LIFT) : y + lift
+      const yr = ground ? Math.max(y + lift, floor(i, 2) + LIFT) : y + lift
+      verts.push(lxp, yl, lzp, rxp, yr, rzp)
     } else {
       verts.push(cx, y + bottom, cz, cx, y + lift, cz)
     }
