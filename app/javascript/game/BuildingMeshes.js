@@ -16,7 +16,7 @@ import { TUNING as T } from "game/Tuning"
 // width, height): a grid of 2.4 m cells per 3 m floor, glass darker and glossier than the wall so the sky
 // environment reflects in it, a light frame, and at night a hashed share of them lit warm. No geometry, no
 // textures: a few dozen shader instructions per fragment, one program for all walls.
-const WIN_UNIFORMS = { uWinLit: { value: 0.55 }, uWinGlow: { value: 1.6 } }
+const WIN_UNIFORMS = { uWinLit: { value: 0.35 }, uWinGlow: { value: 1.4 } }
 function windows(m) {
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, { uDark: LOOK.uDark, uWinLit: WIN_UNIFORMS.uWinLit, uWinGlow: WIN_UNIFORMS.uWinGlow })
@@ -27,36 +27,90 @@ function windows(m) {
       .replace("uniform float opacity;", `uniform float opacity;
 uniform float uDark, uWinLit, uWinGlow;
 varying vec4 vFace; varying vec2 vMeta;
-float winHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`)
+float winHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// Interior mapping (van Dongen, 2008): the view ray enters the window and hits the back, side, floor or ceiling of
+// a virtual room the size of the cell, so the glass shows depth and parallax without any geometry.
+vec3 roomLook(vec3 r, vec2 pm, float roomW, float roomH, float depth, float seed, out float ceil) {
+\tvec3 p = vec3(pm, 0.0);
+\tfloat tz = depth / max(-r.z, 1e-4);
+\tfloat tx = r.x > 0.0 ? (roomW - p.x) / max(r.x, 1e-4) : (r.x < 0.0 ? -p.x / min(r.x, -1e-4) : 1e9);
+\tfloat ty = r.y > 0.0 ? (roomH - p.y) / max(r.y, 1e-4) : (r.y < 0.0 ? -p.y / min(r.y, -1e-4) : 1e9);
+\tfloat t = min(tz, min(tx, ty));
+\tvec3 hue = mix(vec3(0.82, 0.74, 0.62), vec3(0.72, 0.78, 0.84), winHash(vec2(seed * 5.1, 2.7)));
+\tvec3 col = hue;                                                     // back wall
+\tif (tx < tz && tx <= ty) col = hue * 0.72;                           // a side wall, in shade
+\tif (ty < tz && ty < tx) col = r.y < 0.0 ? vec3(0.32, 0.22, 0.14) : vec3(0.92, 0.9, 0.86);   // floor, ceiling
+\tceil = (ty < tz && ty < tx && r.y > 0.0) ? 1.0 : 0.0;
+\tvec3 hit = p + r * t;
+\tfloat lamp = (1.0 - smoothstep(0.35, 0.9, distance(hit.xy / vec2(roomW, roomH), vec2(0.5, 0.75))));   // a light on the back wall
+\treturn col * (0.55 + 0.45 * (1.0 - t / (depth * 1.6))) + lamp * 0.25;
+}`)
       .replace("#include <color_fragment>", `#include <color_fragment>
-\tfloat win = 0.0, frame = 0.0, lit = 0.0;
+\tfloat win = 0.0, frame = 0.0, lit = 0.0, door = 0.0;
+\tvec3 glass = vec3(0.1, 0.12, 0.15);
+\tfloat W = vFace.z, H = vFace.w, base = vMeta.x;
 \t{
-\t\tfloat W = vFace.z, H = vFace.w, base = vMeta.x;
-\t\tconst float floorH = 3.0, cellW = 2.4;
-\t\tfloat ncols = floor((W - 0.9) / cellW);
+\t\tconst float floorH = 3.0, cellW = 3.0;
+\t\tfloat ncols = floor((W - 1.2) / cellW);
 \t\tfloat rows = floor((H - 0.35 + 0.6) / floorH);
-\t\tif (ncols >= 1.0 && rows >= 1.0) {
+\t\t// not every face has windows, and the big blank walls of sheds and halls have few: a per-face draw against its area
+\t\tfloat faceDraw = winHash(vec2(vMeta.y * 31.0, W * 0.37 + H * 0.91));
+\t\tfloat faceKeep = mix(0.9, 0.3, clamp(W * H / 600.0, 0.0, 1.0));
+\t\tif (ncols >= 1.0 && rows >= 1.0 && faceDraw < faceKeep) {
 \t\t\tfloat margin = (W - ncols * cellW) * 0.5;
 \t\t\tfloat cu = (vFace.x - margin) / cellW, cv = (vFace.y - base - 0.35) / floorH;
 \t\t\tfloat ci = floor(cu), ri = floor(cv);
 \t\t\tif (ci >= 0.0 && ci < ncols && ri >= 0.0 && ri < rows) {
 \t\t\t\tvec2 c = vec2(fract(cu), fract(cv));
 \t\t\t\tvec2 aa = fwidth(c) * 1.2 + 0.002;
-\t\t\t\tvec2 lo = vec2(0.31, 0.27), hi = vec2(0.69, 0.73);
-\t\t\t\tvec2 inner = smoothstep(lo - aa, lo + aa, c) * (1.0 - smoothstep(hi - aa, hi + aa, c));
-\t\t\t\tvec2 outer = smoothstep(lo - 0.045 - aa, lo - 0.045 + aa, c) * (1.0 - smoothstep(hi + 0.045 - aa, hi + 0.045 + aa, c));
-\t\t\t\twin = inner.x * inner.y;
-\t\t\t\tframe = max(outer.x * outer.y - win, 0.0);
-\t\t\t\tfloat h = winHash(vec2(ci, ri) + vMeta.y * 17.0);
-\t\t\t\tlit = step(1.0 - uWinLit, h) * (0.55 + 0.45 * winHash(vec2(ri, ci) * 3.1 + vMeta.y));
+\t\t\t\tfloat cellDraw = winHash(vec2(ci, ri) + vMeta.y * 17.0);
+\t\t\t\tfloat doorCol = floor(winHash(vec2(vMeta.y * 3.0, W)) * ncols);
+\t\t\t\tbool isDoor = ri == 0.0 && ci == doorCol && base < 0.5;
+\t\t\t\tvec2 lo = isDoor ? vec2(0.36, 0.02) : vec2(0.33, 0.30), hi = isDoor ? vec2(0.64, 0.72) : vec2(0.67, 0.72);
+\t\t\t\tif (isDoor || cellDraw > 0.22) {
+\t\t\t\t\tvec2 inner = smoothstep(lo - aa, lo + aa, c) * (1.0 - smoothstep(hi - aa, hi + aa, c));
+\t\t\t\t\tvec2 outer = smoothstep(lo - 0.04 - aa, lo - 0.04 + aa, c) * (1.0 - smoothstep(hi + 0.04 - aa, hi + 0.04 + aa, c));
+\t\t\t\t\tfloat cut = inner.x * inner.y;
+\t\t\t\t\tframe = max(outer.x * outer.y - cut, 0.0);
+\t\t\t\t\tif (isDoor) door = cut; else win = cut;
+\t\t\t\t\tlit = step(1.0 - uWinLit, winHash(vec2(ri, ci) * 3.1 + vMeta.y)) * (0.55 + 0.45 * winHash(vec2(ci * 7.0, ri) + vMeta.y));
+\t\t\t\t\tif (win > 0.0) {
+\t\t\t\t\t\t// the view ray in the face's own frame: x along the wall, y up, z out of it
+\t\t\t\t\t\tmat3 toWorld = transpose(mat3(viewMatrix));
+\t\t\t\t\t\tvec3 nW = normalize(toWorld * normalize(vNormal));
+\t\t\t\t\t\tvec3 tW = normalize(cross(vec3(0.0, 1.0, 0.0), nW)), bW = cross(nW, tW);
+\t\t\t\t\t\tvec3 rW = toWorld * (-normalize(vViewPosition));
+\t\t\t\t\t\tvec3 r = vec3(dot(rW, tW), dot(rW, bW), dot(rW, nW));
+\t\t\t\t\t\tif (r.z > -0.05) r.z = -0.05;
+\t\t\t\t\t\tfloat ceil;
+\t\t\t\t\t\tvec3 room = roomLook(r, c * vec2(cellW, floorH), cellW, floorH, 3.5, vMeta.y + ci * 0.13 + ri * 0.71, ceil);
+\t\t\t\t\t\tfloat inside = mix(0.12, 0.05, uDark) + lit * uDark * 0.9;      // dim by day against the sky, lamplit at night
+\t\t\t\t\t\tglass = room * inside;
+\t\t\t\t\t}
+\t\t\t\t}
 \t\t\t}
 \t\t}
 \t}
-\tdiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.85, 0.80), frame);
-\tdiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.09, 0.11, 0.14), win);`)
-      .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\n\troughnessFactor = mix(roughnessFactor, 0.15, win);")
-      .replace("#include <metalnessmap_fragment>", "#include <metalnessmap_fragment>\n\tmetalnessFactor = mix(metalnessFactor, 0.6, win);")
-      .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += win * lit * uDark * uWinGlow * vec3(1.0, 0.78, 0.5);")
+\t// cheap ambient occlusion: the foot of the wall, the eave, and the corners darken; the corner normals bend so the
+\t// edge catches a highlight instead of a hard crease (below, at normal_fragment_begin)
+\tfloat edgeD = min(vFace.x, W - vFace.x);
+\tfloat ao = 1.0 - 0.22 * (1.0 - smoothstep(0.0, 1.8, vFace.y)) - 0.16 * (1.0 - smoothstep(0.0, 0.7, base + H - vFace.y)) - 0.14 * (1.0 - smoothstep(0.0, 0.45, edgeD));
+\tdiffuseColor.rgb *= ao;
+\tdiffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb, vec3(0.9, 0.88, 0.84), 0.55), frame);
+\tdiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16, 0.1, 0.06) * (0.7 + 0.3 * winHash(vec2(vMeta.y, W))), door);
+\tdiffuseColor.rgb = mix(diffuseColor.rgb, glass, win);`)
+      .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\n\troughnessFactor = mix(roughnessFactor, 0.12, win);")
+      .replace("#include <metalnessmap_fragment>", "#include <metalnessmap_fragment>\n\tmetalnessFactor = mix(metalnessFactor, 0.35, win);")
+      .replace("#include <normal_fragment_begin>", `#include <normal_fragment_begin>
+\t{
+\t\tfloat bend = 1.0 - smoothstep(0.0, 0.5, edgeD);
+\t\tif (bend > 0.0) {
+\t\t\tvec3 upV = mat3(viewMatrix) * vec3(0.0, 1.0, 0.0);
+\t\t\tvec3 tV = normalize(cross(upV, normal));
+\t\t\tnormal = normalize(normal + tV * (vFace.x < W * 0.5 ? -1.0 : 1.0) * bend * 0.7);
+\t\t}
+\t}`)
+      .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += win * lit * uDark * uWinGlow * vec3(1.0, 0.8, 0.55) * glass * 2.5;")
   }
   m.customProgramCacheKey = () => "wall-windows"
   return m
@@ -137,9 +191,9 @@ export function buildBuildingMeshes(meshes, reg) {
       let tris
       try { tris = THREE.ShapeUtils.triangulateShape(contour, holes) } catch { continue }
       // per-face tint so adjacent walls read as separate planes; walls get a fake directional shade
-      const tint = 0.92 + ((h ^ (face.length * 7919)) % 17) / 100
+      const tint = 0.96 + ((h ^ (face.length * 7919)) % 9) / 100
       color.setHex(label === 1 ? roof : wall).lerp(white, MIX)
-      const shade = label === 1 ? 1 : 0.85 + 0.15 * Math.abs(normal.x)
+      const shade = label === 1 ? 1 : 0.93 + 0.07 * Math.abs(normal.x)
       const r = color.r * tint * shade, g = color.g * tint * shade, bl = color.b * tint * shade
       const name = label === 1 ? roofSet : wallSet
       const B = buf(name)

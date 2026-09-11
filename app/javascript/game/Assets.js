@@ -100,7 +100,7 @@ function normalise(gltf, spec) {
   scene.traverse((o) => {
     if (o.isSkinnedMesh) o.frustumCulled = false       // the bind-pose bounds are wrong once animated; callers cull by distance
     if (!o.isMesh) return
-    o.castShadow = o.receiveShadow = false
+    o.castShadow = true; o.receiveShadow = false
     const fix = (m) => {
       // KHR_materials_unlit (the mech, the wizard) arrives as MeshBasicMaterial: relight it with the same texture
       if (m.isMeshBasicMaterial) { const std = new THREE.MeshStandardMaterial({ map: m.map, color: m.color, roughness: 0.75, metalness: 0.05, side: m.side, transparent: m.transparent, alphaTest: m.alphaTest }); std.name = m.name; return std }

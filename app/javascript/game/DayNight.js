@@ -12,6 +12,7 @@ export const DAY_SECONDS = 480
 const NIGHT_FROM = 22.25, NIGHT_TO = 3.75, NIGHT_SECONDS = 60      // wall seconds the dark hours take
 export const SUNRISE = 4.5, SUNSET = 21.5
 const SKY_DISTANCE = 3200                                    // inside the camera's far plane, beyond the loaded tiles
+const ZERO = new THREE.Vector3()
 
 const DAY_SKY = new THREE.Color(0x9fb8cf), DUSK_SKY = new THREE.Color(0xe39a6c), NIGHT_SKY = new THREE.Color(0x0a0f1d)
 // sky dome palette: zenith / horizon by phase, plus the glow banked around the sun at dawn and dusk
@@ -80,9 +81,12 @@ export class DayNight {
     w.scene.fog.near = 600 - 300 * (1 - daylight); w.scene.fog.far = 2200 - 900 * (1 - daylight)
 
     // the sun: east at sunrise, high in the south at noon, west at sunset; at night a faint moon from the other side
-    const up = Math.max(elev, 0.02)
+    const up = Math.max(elev, 0.02), A = w.sunAnchor ?? ZERO
     if (elev > -0.05) w.sun.position.set(Math.cos(a) * 600, up * 600, Math.sin(a) * 300 + 80)
     else w.sun.position.set(-Math.cos(a) * 400, 500, -Math.sin(a) * 200 + 150)
+    this.env.sunDir.copy(w.sun.position).normalize()
+    w.sun.position.add(A)                                     // the light (and its shadow camera) rides with the player
+    w.sun.target.position.copy(A)
 
     // sun disc: along the sun's compass direction, reddening and fading as it touches the horizon. The chase camera
     // only sees ~20° above the horizon, so the disc rides a flattened arc (2° at the horizon, 18° at noon) instead
@@ -113,7 +117,6 @@ export class DayNight {
 
     this.darkness = 1 - daylight
     this.env.darkness = this.darkness
-    this.env.sunDir.copy(w.sun.position).normalize()
     this.env.sunColor.copy(w.sun.color).multiplyScalar(w.sun.intensity)
     this.env.zenith.copy(u.zenith.value); this.env.horizon.copy(u.horizon.value)
     return this.darkness

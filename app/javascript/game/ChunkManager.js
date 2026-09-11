@@ -143,6 +143,10 @@ export class ChunkManager {
         const ground = (x, z) => roadHeight(roadIndex, x, z, terrain)
         for (const part of [buildLamps(data.furniture.lamps, ground, reg), buildSignals(data.furniture.signals, ground, reg), buildSigns(data.furniture.signs, ground, reg)]) if (part) group.add(part)
       }
+      // shadows: the ground and the roads receive, everything standing casts and receives
+      terrain.mesh.receiveShadow = true
+      if (roads) roads.traverse((o) => { if (o.isMesh) o.receiveShadow = true })
+      for (const g of [buildings, meshes, trees]) g?.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
       this.scene.add(group)
       const tile = { key, tx, ty, group, terrain, roads: data.roads, roadIndex, junctions: data.junctions ?? [], biome: data.biome, objects, water: waterPolys(data.cover ?? [], data.origin) }
       this.tiles.set(key, tile)

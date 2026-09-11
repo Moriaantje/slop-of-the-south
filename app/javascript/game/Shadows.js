@@ -7,11 +7,12 @@ import { softTexture } from "game/Effects"
 // but a blob under a moving thing is most of what the eye wants. ?shadows=0 hides them.
 const geo = new THREE.CircleGeometry(1, 24); geo.rotateX(-Math.PI / 2); geo.__shared = true
 const ENABLED = !off("shadows")
+const STRENGTH = 0.28                       // faint: the shadow map draws the real one, this only anchors the body
 
 export class Blob {
   constructor(scene, w = 1.2, l = 2.4) {
     this.scene = scene
-    this.material = new THREE.MeshBasicMaterial({ map: softTexture(), color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 })
+    this.material = new THREE.MeshBasicMaterial({ map: softTexture(), color: 0x000000, transparent: true, opacity: STRENGTH, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 })
     this.mesh = new THREE.Mesh(geo, this.material)
     this.mesh.renderOrder = 1
     this.mesh.visible = ENABLED
@@ -29,7 +30,7 @@ export class Blob {
     m.rotation.y = yaw
     const g = 1 + Math.max(0, height) / 20
     m.scale.set(this.w * g, 1, this.l * g)
-    this.material.opacity = 0.45 * (1 - 0.5 * darkness) * THREE.MathUtils.clamp(1 - height / 40, 0, 1)
+    this.material.opacity = STRENGTH * (1 - 0.5 * darkness) * THREE.MathUtils.clamp(1 - height / 40, 0, 1)
   }
 
   dispose() {

@@ -196,6 +196,8 @@ async function main() {
 
     chunks.update(car.x, car.z)
     updateSignals()
+    // the sun's shadow map is centred a little ahead of the player, stepped in 4 m so the shadows do not swim
+    { const f = car.forward(); world.sunAnchor.set(Math.round((car.x + f.x * 50) / 4) * 4, Math.round(car.y / 4) * 4, Math.round((car.z + f.z * 50) / 4) * 4) }
     const darkness = dayNight.update()
     skyEnv.update(now)
     car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)

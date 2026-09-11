@@ -80,6 +80,7 @@ export class Npcs {
     const inst = this.assets.instantiate(MODELS[seed % MODELS.length], { onReady: (i) => recolour(i.root, rng) })
     const root = new THREE.Group()
     root.add(inst.root)
+    root.traverse((o) => { if (o.isMesh) o.castShadow = true })
     root.position.set(n.x, 0, n.z)
     root.rotation.y = n.yaw
     this.scene.add(root)

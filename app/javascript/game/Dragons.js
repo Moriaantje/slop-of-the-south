@@ -101,8 +101,10 @@ export class Dragons {
       fin.scale.set(0.9, 1.6 * (1 - 0.5 * k) / 0.85, 0.35 / (SPACING * 0.72) * r)   // in the parent's stretched frame
       fin.position.y = 0.7                                                          // in the unit sphere: on the back
       seg.add(fin)
+      seg.castShadow = true
       body.add(seg); segs.push(seg)
     }
+    head.traverse((o) => { if (o.isMesh) o.castShadow = true })
     const wings = [-1, 1].map((side) => {
       const w = new THREE.Group()
       const membrane = new THREE.Mesh(wingGeo, wingMat), bone = new THREE.Mesh(wingBoneGeo, boneMat)

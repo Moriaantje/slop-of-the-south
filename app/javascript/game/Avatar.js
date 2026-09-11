@@ -17,6 +17,7 @@ export class Avatar {
     this.active = this.car
     this.morph = null
     this.cooldown = 0
+    for (const m of [this.car.mesh, this.mech.mesh]) m.traverse((o) => { if (o.isMesh && !o.isSprite) o.castShadow = true })
     scene.add(this.car.mesh)
   }
 
@@ -49,6 +50,7 @@ export class Avatar {
   // a new car from the picker (the mech is not in the roster: T gets you there)
   setSpec(spec) {
     const old = this.car.setSpec(spec)
+    this.car.mesh.traverse((o) => { if (o.isMesh && !o.isSprite) o.castShadow = true })
     if (this.mode === "car") { this.scene.remove(old); this.scene.add(this.car.mesh) }
     return old
   }
