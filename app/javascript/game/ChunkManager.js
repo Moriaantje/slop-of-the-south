@@ -37,6 +37,11 @@ export class ChunkManager {
       if (!wanted.has(key) && !t.loading) { this.dispose(t); this.tiles.delete(key) }
   }
 
+  // drop every loaded tile so the next update streams pristine copies (a new round restores the world)
+  reload() {
+    for (const [key, t] of this.tiles) if (!t.loading) { this.dispose(t); this.tiles.delete(key) }
+  }
+
   ready(x, z) {
     const t = this.tiles.get(this.tileIndex(x, z).join("_"))
     return !!(t && !t.loading)

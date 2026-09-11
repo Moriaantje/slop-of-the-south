@@ -8,6 +8,7 @@ module Game
     NOSE      = Round::CARRIER[:length] / 2.0
     KINDS     = %w[city town village].freeze
     OBSTACLES = 15..250                            # retry the pick when a corridor is empty or hopeless
+    FIRST_AT  = 120.0                              # ...or when the first obstacle gives the players no time
 
     # The executor's query cache would hand back the same random town for the life of the process; go around it.
     def prepare(tries: 5)
@@ -18,7 +19,7 @@ module Game
           path = path_for(place[:cx], place[:cz], rand * Math::PI)
           obstacles = obstacles(path)
           best = { arena: place.merge(half: HALF), path:, obstacles:, spawn: spawn_near(path) }
-          return best if OBSTACLES.cover?(obstacles.size)
+          return best if OBSTACLES.cover?(obstacles.size) && obstacles.first[:at] >= FIRST_AT
         end
         best
       end

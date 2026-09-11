@@ -1,6 +1,7 @@
 // Minimap drawn from our own map data (see MapBuilder): an overview of the whole play area plus 1 km detail cells
 // fetched as you zoom in. Small: follows the car, north-up. Expanded (M): drag to pan, wheel to zoom around the
-// cursor, F fits the full bounds, a click teleports the car, Escape/M close.
+// cursor, F fits the full bounds, a click teleports the car, Escape/M close. During a round it also shows the arena,
+// the carrier's path with the obstacles still standing on it, and the carrier itself.
 const SMALL_SCALE = 3.5          // m/px in the corner map
 const DETAIL_SCALE = 4.5         // load 1 km detail cells when zoomed in beyond this (the corner map included)
 const MIN_SCALE = 0.4            // max zoom-in
@@ -52,8 +53,7 @@ export class Minimap {
       if (!this.expanded) { this.toggle(); return }                // clicking the small map opens it
       if (drag.moved) return
       const [x, z] = this.toWorld(e.offsetX, e.offsetY)
-      this.onTeleport(x, z)
-      this.toggle()
+      if (this.onTeleport(x, z) !== false) this.toggle()          // a refused teleport keeps the map open
     })
     canvas.addEventListener("mouseleave", () => { this.hover = null; this.drag = null; this.dirty = true })
     canvas.addEventListener("wheel", (e) => {
@@ -112,8 +112,9 @@ export class Minimap {
   toPixel(x, z) { return [this.w / 2 + (x - this.view.cx) / this.view.scale, this.h / 2 + (z - this.view.cz) / this.view.scale] }
   toWorld(px, py) { return [this.view.cx + (px - this.w / 2) * this.view.scale, this.view.cz + (py - this.h / 2) * this.view.scale] }
 
-  update(car, remotes) {
-    this.car = car; this.remotes = remotes
+  update(car, remotes, round) {
+    this.car = car; this.remotes = remotes; this.round = round
+    if (round?.running) this.dirty = true                          // the carrier moves even when the car stands still
     if (!this.expanded) {
       if (this.view.cx !== car.x || this.view.cz !== car.z) this.dirty = true
       this.view = { cx: car.x, cz: car.z, scale: SMALL_SCALE }
@@ -164,6 +165,7 @@ export class Minimap {
     if (s < 4) for (const c of cells) this.drawBuildings(c.buildings)
     if (s < 1.8) for (const c of cells) this.drawTrees(c.trees)
     this.drawBorder()
+    this.drawArena()
     if (this.expanded) this.drawLabels()
     this.drawCars()
     if (this.expanded) this.drawChrome()
@@ -267,6 +269,32 @@ export class Minimap {
     ctx.strokeStyle = "#e0401a"; ctx.lineWidth = this.expanded ? 3 : 2; ctx.setLineDash([6, 4])
     for (const ring of this.cfg.border) { ctx.beginPath(); this.path(ring); ctx.closePath(); ctx.stroke() }
     ctx.setLineDash([])
+  }
+
+  // the round: the arena square, the carrier's path with the obstacles still standing on it, and the carrier
+  drawArena() {
+    const r = this.round?.round
+    if (!r) return
+    const { ctx } = this
+    const a = r.arena, p = r.path
+    const [ax, ay] = this.toPixel(a.cx - a.half, a.cz - a.half), size = 2 * a.half / this.view.scale
+    ctx.strokeStyle = "#f2c14e"; ctx.lineWidth = 2; ctx.setLineDash([8, 4]); ctx.strokeRect(ax, ay, size, size)
+    ctx.strokeStyle = "#e0241a"; ctx.lineWidth = this.expanded ? 3 : 2.5; ctx.setLineDash([10, 6])
+    ctx.beginPath(); this.path([p.x0, p.z0, p.x1, p.z1]); ctx.stroke()
+    ctx.setLineDash([])
+    const [ex, ey] = this.toPixel(p.x1, p.z1)
+    ctx.fillStyle = "#e0241a"; ctx.beginPath(); ctx.arc(ex, ey, 4, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = "#8b1a1a"
+    for (const o of this.round.obstacles.values()) {
+      if (o.state === "gone") continue
+      const [px, py] = this.toPixel(o.x, o.z)
+      ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill()
+    }
+    if (r.status === "ended") return
+    const [kx, ky] = this.toPixel(...this.round.carrierAt(this.round.now()))
+    ctx.fillStyle = "#f2c14e"; ctx.strokeStyle = "#111"; ctx.lineWidth = 2
+    ctx.beginPath(); ctx.arc(kx, ky, this.expanded ? 7 : 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
+    if (this.expanded) { ctx.font = "bold 12px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillStyle = "#111"; ctx.fillText("kernkop", kx, ky - 9) }
   }
 
   drawCars() {

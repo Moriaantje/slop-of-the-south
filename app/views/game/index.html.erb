@@ -14,7 +14,14 @@
     <%# game time: a full day every 6 minutes (DayNight.js) %>
     <div id="clock"></div>
     <div id="players"></div>
+    <%# the round: arena, carrier progress, obstacles left (Round.js) %>
+    <div id="ronde" class="bord bord-plaats" hidden></div>
+    <%# the shared action: teleport or vehicle switch, one per minute %>
+    <div id="actie" hidden></div>
   </div>
+  <%# round start / result banner in the middle of the screen %>
+  <div id="banner" class="bord" hidden><div id="banner-titel"></div><div id="banner-sub" class="bord-wijk"></div></div>
+  <div id="flits" hidden></div>
   <div id="speed"><span id="kmh">0</span><small>km/h</small></div>
 </div>
 
@@ -39,7 +46,12 @@
   .bord-wijk { font-size: 12px; font-weight: 500; letter-spacing: .16em; opacity: .95; margin-bottom: 4px; }
   .bord-wijk:empty { display: none; }
   .bord-plaats { font-size: 16px; padding: 7px 16px 8px; }
-  #players, #biome, #clock { font-size: 14px; background: rgba(255, 255, 255, .6); padding: 3px 9px; border-radius: 4px; }
+  #players, #biome, #clock, #actie { font-size: 14px; background: rgba(255, 255, 255, .6); padding: 3px 9px; border-radius: 4px; }
+  #actie { font-variant-numeric: tabular-nums; }
+  #banner { position: absolute; left: 50%; top: 16%; transform: translateX(-50%); font-size: 40px; padding: 16px 44px 18px; white-space: nowrap; }
+  #banner .bord-wijk { font-size: 15px; margin: 6px 0 0; }
+  #flits { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); background: rgba(18, 22, 30, .85); color: #fff;
+           padding: 10px 18px; border-radius: 8px; font-size: 16px; white-space: nowrap; }
   #biome { font-style: italic; text-transform: capitalize; }
   #clock { font-variant-numeric: tabular-nums; }
   #biome:empty { display: none; }

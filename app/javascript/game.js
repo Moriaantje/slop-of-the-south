@@ -12,6 +12,8 @@ import { RemoteCars } from "game/RemoteCars"
 import { Locator, nearestPointOnRoads } from "game/Locator"
 import { Minimap } from "game/Minimap"
 import { FlameWall } from "game/FlameWall"
+import { Round } from "game/Round"
+import { Carrier } from "game/Carrier"
 
 async function main() {
   const config = await (await fetch("/api/world")).json()
@@ -25,6 +27,7 @@ async function main() {
   }
   const container = document.getElementById("game")
   const playerId = container.dataset.playerId
+  const el = (id) => document.getElementById(id)
 
   const world   = new World(container)
   const chunks  = new ChunkManager(world.scene, config)
@@ -32,32 +35,51 @@ async function main() {
   const car     = new Vehicle(config.spawn)
   const remotes = new RemoteCars(world.scene)
   const dayNight = new DayNight(world)
-  const clockEl = document.getElementById("clock")
-  window.slop = { world, dayNight, car, remotes }     // for poking at the scene from the console
+  const carrier = new Carrier(world.scene)
+  const burnEl = el("burn")
+  const burn = (ms) => { burnEl.classList.add("on"); setTimeout(() => burnEl.classList.remove("on"), ms) }
+  let placed = false          // car and camera snapped onto the terrain once the spawn tile is in
+  let snapToRoad = urlSpawn   // after a map teleport or a ?spawn= URL: move onto the nearest street once its tile is in
+  const teleport = (x, z, yaw = car.yaw) => { car.reset({ x, z, yaw }); placed = false; snapToRoad = true; burn(400) }
+
+  // the round: a new arena restores the world, a start drops everyone at the arena spawn (a page load mid-round too)
+  const round = new Round(playerId, { ronde: el("ronde"), actie: el("actie"), banner: el("banner"), bannerTitel: el("banner-titel"), bannerSub: el("banner-sub"), flits: el("flits") }, {
+    onRound: (body, { fresh, started, live }) => {
+      if (fresh) chunks.reload()
+      carrier.setRound(round)
+      if (body.status === "running" && (started || !live && !urlSpawn)) { config.spawn = body.spawn; teleport(body.spawn.x, body.spawn.z, body.spawn.yaw) }
+    },
+    onEnd: () => carrier.hide(),
+    onAction: (msg) => { if (msg.type === "teleport") teleport(msg.x, msg.z) },
+  })
+  window.slop = { world, dayNight, car, remotes, chunks, round, carrier }     // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
-  const net     = new Network({ room: "main", playerId, onMessage: (m) => remotes.receive(m) })
+  const net = new Network({ room: "main", onMessage: (m) => {
+    if (m.type === "move" || m.type === "join" || m.type === "leave") { if (m.id !== playerId) remotes.receive(m); return }
+    if (m.type === "fire") return
+    round.receive(m)
+  } })
   const locator = new Locator(config.places)
-  const minimap = new Minimap(document.getElementById("minimap"), config, {
-    onTeleport: (x, z) => { car.reset({ x, z, yaw: car.yaw }); placed = false; snapToRoad = true }
+  const minimap = new Minimap(el("minimap"), config, {
+    // a map click asks the server for a teleport; the car moves when the answer comes back
+    onTeleport: (x, z) => {
+      if (!round.running) { round.flash("Teleporteren kan alleen tijdens een ronde"); return false }
+      if (!round.canAct()) { round.flash(`Actie beschikbaar over ${round.countdown()}`); return false }
+      net.send("teleport", { x, z })
+    }
   })
 
   world.scene.add(car.mesh)
   const wall = config.border?.length ? new FlameWall(config.border) : null
   if (wall) world.scene.add(wall.mesh)
-  const burnEl = document.getElementById("burn")
   let lastInside = null       // last position inside the border, to fall back to after burning
 
-  const kmh = document.getElementById("kmh")
-  const playersEl = document.getElementById("players")
-  const signEl = document.getElementById("sign"), streetEl = document.getElementById("sign-street")
-  const districtEl = document.getElementById("sign-district"), placeEl = document.getElementById("sign-place")
-  const biomeEl = document.getElementById("biome")
+  const kmh = el("kmh"), playersEl = el("players"), clockEl = el("clock")
+  const signEl = el("sign"), streetEl = el("sign-street"), districtEl = el("sign-district"), placeEl = el("sign-place"), biomeEl = el("biome")
   const timer = new THREE.Timer()
   let netTimer = 0, signTimer = 0, borderTimer = 0
-  let placed = false          // car and camera snapped onto the terrain once the spawn tile is in
-  let snapToRoad = urlSpawn   // after a map teleport or a ?spawn= URL: move onto the nearest street once its tile is in
 
   function frame(now) {
     timer.update(now)
@@ -95,12 +117,13 @@ async function main() {
           car.reset(lastInside ?? homeSpawn)
           car.yaw += Math.PI                                      // turn around
           placed = false
-          burnEl.classList.add("on"); setTimeout(() => burnEl.classList.remove("on"), 600)
+          burn(600)
         }
       }
     }
     world.followCamera(car, dt)
     remotes.update(car, world.camera)
+    carrier.update(round.now(), dt, chunks, car, world.camera)
 
     netTimer += dt
     if (netTimer > 0.1) { netTimer = 0; net.sendMove(car.state()) }
@@ -116,9 +139,10 @@ async function main() {
       placeEl.hidden = !locator.place
       biomeEl.textContent = chunks.biomeAt(car.x, car.z) ?? ""
       clockEl.textContent = dayNight.clock()
+      round.hud()
     }
-    minimap.update(car, remotes)
-    
+    minimap.update(car, remotes, round)
+
     kmh.textContent = Math.round(Math.abs(car.speed) * 3.6)
     playersEl.textContent = remotes.count ? `${remotes.count} andere ${remotes.count === 1 ? "chauffeur" : "chauffeurs"} online` : ""
 
