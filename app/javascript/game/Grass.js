@@ -1,4 +1,5 @@
 import * as THREE from "three"
+import { nearRoad, insideAny, inBuilding, hash } from "game/Placement"
 
 // Grass and flowers where the land cover says grass: for the tiles nearest the player, tufts are scattered on a
 // jittered grid wherever the tile's painted cover is green (meadow, lawn, verge) and no road or house stands, as
@@ -161,45 +162,6 @@ export class Grass {
     this.layers.delete(key)
   }
 }
-
-// ---- placement tests --------------------------------------------------------------------------------------------
-function nearRoad(index, x, z) {
-  // index: ChunkManager's road grid { x0, z0, nx, nz, cells, cell }; items are segments [ax, az, ay, bx, bz, by, hw] or
-  // junction discs [x, z, y, r]. Keep 3.5 m off the asphalt edge: verge, sidewalk and curb stay clear.
-  const cx = Math.floor((x - index.x0) / index.cell), cz = Math.floor((z - index.z0) / index.cell)
-  if (cx < 0 || cz < 0 || cx >= index.nx || cz >= index.nz) return false
-  const items = index.cells[cz * index.nx + cx]
-  if (!items) return false
-  for (const s of items) {
-    if (s.length === 4) { if (Math.hypot(s[0] - x, s[1] - z) < s[3] + 3.5) return true; continue }
-    const dx = s[3] - s[0], dz = s[4] - s[1], len2 = dx * dx + dz * dz || 1
-    const t = Math.max(0, Math.min(1, ((x - s[0]) * dx + (z - s[1]) * dz) / len2))
-    if (Math.hypot(s[0] + dx * t - x, s[1] + dz * t - z) < s[6] + 3.5) return true
-  }
-  return false
-}
-function insideAny(polys, x, z) {
-  if (!polys) return false
-  for (const w of polys) if (insideRing(x, z, w.ring)) return true
-  return false
-}
-function inBuilding(objects, x, z) {
-  for (const h of objects.values()) {
-    if (!h.rings) continue
-    if (x < h.x - 60 || x > h.x + 60 || z < h.z - 60 || z > h.z + 60) continue
-    for (const ring of h.rings) if (insideRing(x, z, ring)) return true
-  }
-  return false
-}
-function insideRing(x, z, r) {
-  let inside = false
-  for (let i = 0, j = r.length - 2; i < r.length; j = i, i += 2) {
-    const xi = r[i], zi = r[i + 1], xj = r[j], zj = r[j + 1]
-    if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) inside = !inside
-  }
-  return inside
-}
-function hash(v) { const x = Math.sin(v * 12.9898) * 43758.5453; return x - Math.floor(x) }
 
 // ---- the painting: a tuft of blades, with daisies or poppies on kinds 1 and 2 -------------------------------------
 function paintTuft(kind) {

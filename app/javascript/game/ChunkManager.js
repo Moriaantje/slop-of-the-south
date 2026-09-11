@@ -150,7 +150,7 @@ export class ChunkManager {
       if (roads) roads.traverse((o) => { if (o.isMesh) o.receiveShadow = true })
       for (const g of [buildings, meshes, trees]) g?.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
       this.scene.add(group)
-      const tile = { key, tx, ty, group, terrain, roads: data.roads, roadIndex, junctions: data.junctions ?? [], biome: data.biome, objects, water: waterPolys(data.cover ?? [], data.origin), coverClass }
+      const tile = { key, tx, ty, group, terrain, roads: data.roads, roadIndex, junctions: data.junctions ?? [], biome: data.biome, objects, water: waterPolys(data.cover ?? [], data.origin), coverClass, cover: data.cover ?? [] }
       this.tiles.set(key, tile)
       this.hooks.onTile?.(tile)
     } catch (e) {

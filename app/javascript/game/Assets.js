@@ -1,6 +1,7 @@
 import * as THREE from "three"
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import { clone as skeletonClone } from "three/addons/utils/SkeletonUtils.js"
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js"
 import { versioned } from "game/Textures"
 
 // The glTF pipeline for the living things: rigged CC0 models (Quaternius) under public/models/*.glb, loaded once,
@@ -91,6 +92,38 @@ export class Assets {
       onReady?.(inst)
     })
     return inst
+  }
+
+  // A prop as instancing wants it: the model's meshes with their transforms baked in, merged per material, so a
+  // thousand barrels are one draw call. Resolves to [{ geometry, material }] (empty when the file is missing).
+  instanced(name) {
+    this.baked ??= new Map()
+    if (this.baked.has(name)) return this.baked.get(name)
+    const p = this.load(name).then((model) => {
+      if (model.missing) return []
+      model.root.updateMatrixWorld(true)
+      const byMat = new Map()
+      model.root.traverse((o) => {
+        if (!o.isMesh || o.isSkinnedMesh) return
+        const mats = Array.isArray(o.material) ? o.material : [o.material]
+        const groups = o.geometry.groups?.length ? o.geometry.groups : [{ start: 0, count: Infinity, materialIndex: 0 }]
+        for (const g of groups) {
+          const mat = mats[g.materialIndex ?? 0] ?? mats[0]
+          const geo = o.geometry.clone().applyMatrix4(o.matrixWorld)
+          geo.deleteAttribute("color")                              // instance colour would clash
+          if (!byMat.has(mat)) byMat.set(mat, [])
+          byMat.get(mat).push(geo)
+        }
+      })
+      return [...byMat].map(([material, geos]) => {
+        const geometry = geos.length === 1 ? geos[0] : (mergeGeometries(geos, false) ?? geos[0])
+        geometry.__shared = true
+        material.__shared = true
+        return { geometry, material }
+      })
+    })
+    this.baked.set(name, p)
+    return p
   }
 }
 

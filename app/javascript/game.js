@@ -15,6 +15,7 @@ import { Post } from "game/Post"
 import { Atmosphere } from "game/Atmosphere"
 import { Grass, GRASS_UNIFORMS } from "game/Grass"
 import { Props } from "game/Props"
+import { Scatter } from "game/Scatter"
 import { TREE_UNIFORMS } from "game/Trees"
 import { flag } from "game/Flags"
 import { textureStats } from "game/Textures"
@@ -125,6 +126,8 @@ async function main() {
   // the people at the hubs and the quests they hand out
   const npcs = new Npcs({ scene: world.scene, assets, hubs, heightAt: (x, z) => chunks.heightAt(x, z) })
   const props = new Props({ scene: world.scene, assets, hubs, heightAt: (x, z) => chunks.heightAt(x, z) })
+  // the landscape between the roads: hedgerows, hay bales, boulders, farmyard clutter, by land cover
+  const scatter = new Scatter({ scene: world.scene, assets, heightAt: (x, z) => chunks.heightAt(x, z) })
   let quests = null
   // the session: who you are in the world, and what the server decides about you
   const session = new Session(playerId, { actie: el("actie"), banner: el("banner"), bannerTitel: el("banner-titel"), bannerSub: el("banner-sub"), flits: el("flits"), status: el("status") }, {
@@ -165,7 +168,7 @@ async function main() {
   spells.targets = (x, z, yaw) => dragons.nearest(x, z, yaw)
   spells.onStrike = (target, kind) => dragons.struck(target, kind)
   combat.onStrike = (target, kind) => dragons.struck(target, kind)
-  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, player, spells, dragons, npcs, quests, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
+  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, player, spells, dragons, npcs, quests, scatter, props, grass, air, post, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
@@ -287,6 +290,7 @@ async function main() {
     dragons.update(car, world.camera, dt, darkness)
     npcs.update(car, world.camera, dt, darkness)
     props.update(car)
+    scatter.update(chunks.tiles, car.x, car.z)
     quests.update(car, world.camera, dt)
     const prompt = quests.open ? null : npcs.prompt
     if (prompt !== lastPrompt) { lastPrompt = prompt; promptEl.hidden = !prompt; promptEl.textContent = prompt ?? "" }
