@@ -13,11 +13,14 @@ module Game
       @cache[name] ||= lookup(name) || { title: name, extract: "#{name} is een #{KIND_NL[kind] || 'plaats'} in Limburg.", images: [] }
     end
 
-    # the article itself or the disambiguated one; the extract has to mention Limburg so a namesake elsewhere loses
+    # the Limburg-specific article when there is one, else the plain one, else whatever a search for the town in
+    # Limburg turns up under its name (Venlo and Nuth are disambiguation pages with "(stad)"/"(plaats)" articles)
     def self.lookup(name)
-      [ name, "#{name} (Limburg)", "#{name} (Nederland)" ].each do |title|
+      titles = [ "#{name} (Limburg)", name, "#{name} (Nederland)" ]
+      titles.concat(search(name)) if titles.none? { (page = get("summary/#{CGI.escape(_1.tr(' ', '_'))}")) && page["type"] == "standard" }
+      titles.uniq.each do |title|
         page = get("summary/#{CGI.escape(title.tr(' ', '_'))}") or next
-        next unless page["type"] == "standard" && page["extract"].to_s.include?("Limburg")
+        next unless page["type"] == "standard"
         lead = page.dig("thumbnail", "source")&.sub(%r{/\d+px-}, "/1280px-")
         return { title: page["title"], extract: page["extract"], images: [ lead, *pictures(title) ].compact.uniq.first(4) }
       end
@@ -31,9 +34,17 @@ module Game
     def self.pictures(title)
       list = get("media-list/#{CGI.escape(title.tr(' ', '_'))}") or return []
       list["items"].to_a.filter_map do |item|
-        src = item.dig("srcset", 0, "src").to_s.split("?").first
+        src = item.dig("srcset", 0, "src").to_s[/\A[^?]*/]
         "https:#{src.sub(%r{/\d+px-}, "/1280px-")}" if item["type"] == "image" && src.match?(/\.jpe?g\z/i)
       end
+    end
+
+    # article titles for the town from a full-text search, "Venlo (stad)" style ones first
+    def self.search(name)
+      uri = URI("https://nl.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=8&srsearch=#{CGI.escape("#{name} Limburg")}")
+      res = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 3, read_timeout: 4) { _1.get(uri.request_uri, HEADERS) }
+      return [] unless res.is_a?(Net::HTTPSuccess)
+      JSON.parse(res.body).dig("query", "search").to_a.map { _1["title"] }.select { _1.start_with?("#{name} (") }
     end
 
     def self.get(path)

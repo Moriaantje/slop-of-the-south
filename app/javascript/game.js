@@ -13,7 +13,9 @@ import { Locator, nearestPointOnRoads } from "game/Locator"
 import { Minimap } from "game/Minimap"
 import { FlameWall } from "game/FlameWall"
 import { Round } from "game/Round"
-import { Carrier } from "game/Carrier"
+import { Parade } from "game/Parade"
+import { LoadingScreen } from "game/LoadingScreen"
+import { Music } from "game/Music"
 import { Destructibles } from "game/Destructibles"
 import { Combat } from "game/Combat"
 import { Effects } from "game/Effects"
@@ -48,26 +50,34 @@ async function main() {
   const carFx   = new VehicleFx(car.mesh, effects.smoke)
   const remotes = new RemoteCars(world.scene, effects.smoke)
   const dayNight = new DayNight(world)
-  const carrier = new Carrier(world.scene)
+  const parade  = new Parade(world.scene)
+  const loading = new LoadingScreen(el("laden"))
+  const music   = new Music(el("muziek"))
   const burnEl = el("burn")
   const burn = (ms) => { burnEl.classList.add("on"); setTimeout(() => burnEl.classList.remove("on"), ms) }
   let placed = false          // car and camera snapped onto the terrain once the spawn tile is in
   let snapToRoad = urlSpawn   // after a map teleport or a ?spawn= URL: move onto the nearest street once its tile is in
   const teleport = (x, z, yaw = car.yaw) => { car.reset({ x, z, yaw }); placed = false; snapToRoad = true; burn(400) }
 
-  // the round: a new arena restores the world, a start drops everyone at the arena spawn (a page load mid-round too)
+  // the round: a new town restores the world and drops everyone on its spawn road behind the loading screen (a page
+  // load mid-round too, unless the URL asked for a spot)
   const round = new Round(playerId, { ronde: el("ronde"), actie: el("actie"), banner: el("banner"), bannerTitel: el("banner-titel"), bannerSub: el("banner-sub"), flits: el("flits") }, {
-    onRound: (body, { fresh, started, live }) => {
-      if (fresh) { chunks.reload(); index.resetRound(); combat.reset() }
+    onRound: (body, { fresh, live }) => {
+      if (fresh) {
+        chunks.reload(); index.resetRound(); combat.reset()
+        config.spawn = body.spawn
+        if (live || !urlSpawn) teleport(body.spawn.x, body.spawn.z, body.spawn.yaw)
+        if (body.status !== "ended") loading.show(body.arena, body.id)
+      }
       index.applyAll(body.obstacles.concat(body.objects))
-      carrier.setRound(round)
-      if (body.status === "running" && (started || !live && !urlSpawn)) { config.spawn = body.spawn; teleport(body.spawn.x, body.spawn.z, body.spawn.yaw) }
+      parade.setRound(round)
+      if (body.status === "ended") loading.hide()
     },
     onObjects: (list) => index.applyAll(list),
-    onEnd: (msg) => { carrier.hide(); combat.enabled = false; if (msg.result === "lost") index.cosmeticWipe(msg.x, msg.z, 300) },
+    onEnd: (msg) => { parade.hide(); combat.enabled = false; effects.confetti(msg.x, chunks.heightAt(msg.x, msg.z) + 4, msg.z) },
     onAction: (msg) => { if (msg.type === "teleport") teleport(msg.x, msg.z) },
   })
-  window.slop = { world, dayNight, car, remotes, chunks, round, carrier, index, combat, effects, pickups, tuning: TUNING }   // for poking at the scene from the console
+  window.slop = { world, dayNight, car, remotes, chunks, round, parade, index, combat, effects, pickups, music, loading, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
@@ -114,6 +124,7 @@ async function main() {
     car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)
     updateWater(dayNight.env, timer.getElapsed())
     if (input.toggleMap) minimap.toggle()
+    if (input.mute) round.flash(music.toggle() ? "Muziek uit" : "Muziek aan")
     if (chunks.ready(car.x, car.z)) {
       if (input.reset) { car.reset(config.spawn); placed = false }
       if (!placed) {
@@ -153,7 +164,8 @@ async function main() {
     world.followCamera(car, dt)
     effects.update(dt, world.camera)
     remotes.update(car, world.camera)
-    carrier.update(round.now(), dt, chunks, car, world.camera)
+    parade.update(round.now(), dt, chunks, car, world.camera)
+    if (loading.open && round.running && chunks.readyFraction(car.x, car.z) >= 1) loading.hide()
 
     netTimer += dt
     if (netTimer > 0.1) { netTimer = 0; net.sendMove(car.state()); combat.flush() }
@@ -170,6 +182,8 @@ async function main() {
       biomeEl.textContent = chunks.biomeAt(car.x, car.z) ?? ""
       clockEl.textContent = dayNight.clock()
       round.hud()
+      if (loading.open) loading.progress(chunks.readyFraction(car.x, car.z), round.running ? null : Math.max(0, Math.ceil(((round.round?.next_at ?? 0) - round.now()) / 1000)))
+      music.update(!!round.round && round.status !== "ended", parade.mesh.visible ? Math.hypot(parade.x - car.x, parade.z - car.z) : Infinity)
     }
     minimap.update(car, remotes, round)
 

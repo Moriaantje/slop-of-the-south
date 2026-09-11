@@ -60,6 +60,15 @@ export class ChunkManager {
     return !!(t && !t.loading)
   }
 
+  // share of the tiles around (x, z) that are in, for the loading screen
+  readyFraction(x, z) {
+    const [cx, cy] = this.tileIndex(x, z)
+    let n = 0, total = 0
+    for (let dy = -this.radius; dy <= this.radius; dy++)
+      for (let dx = -this.radius; dx <= this.radius; dx++) { total++; const t = this.tiles.get(`${cx + dx}_${cy + dy}`); if (t && !t.loading) n++ }
+    return n / total
+  }
+
   // Height under (x, z): the road surface when on a road (blended to the terrain over the ribbon edge), else the terrain.
   heightAt(x, z) {
     const t = this.tiles.get(this.tileIndex(x, z).join("_"))

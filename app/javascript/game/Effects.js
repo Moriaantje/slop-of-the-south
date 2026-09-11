@@ -7,6 +7,8 @@ const MAX_LIVE = 40
 const flashGeo = new THREE.SphereGeometry(1, 12, 8)
 const debrisGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5)
 const debrisMat = new THREE.MeshStandardMaterial({ color: 0x8a8078, roughness: 1 })
+const confettiGeo = new THREE.PlaneGeometry(0.35, 0.25)
+const CONFETTI = [0xe0241a, 0xf2c14e, 0x2a9d3a].map((color) => new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }))
 let dustTex = null
 
 export class Effects {
@@ -56,6 +58,23 @@ export class Effects {
     const mesh = new THREE.Sprite(mat)
     mesh.position.set(x, y + r * 0.25, z)
     this.add({ mesh, life: 1.3, t: 0, step: (e, k) => { e.mesh.scale.setScalar(r * (0.5 + k)); mat.opacity = 0.7 * (1 - k) } })
+  }
+
+  // the parade's finale, or its undoing: a burst of paper in the vastelaovend colours
+  confetti(x, y, z) {
+    const group = new THREE.Group(), bits = []
+    for (let i = 0; i < 120; i++) {
+      const m = new THREE.Mesh(confettiGeo, CONFETTI[i % CONFETTI.length])
+      m.position.set(x, y, z)
+      m.rotation.set(Math.random() * 3, Math.random() * 3, 0)
+      const a = Math.random() * Math.PI * 2, r = 4 + Math.random() * 14
+      bits.push({ m, v: new THREE.Vector3(Math.cos(a) * r, 9 + Math.random() * 12, Math.sin(a) * r), spin: 4 + Math.random() * 8 })
+      group.add(m)
+    }
+    this.add({ mesh: group, life: 4, t: 0, shared: true, step: (e, k, dt) => {
+      for (const b of bits) { b.v.y -= 9 * dt; b.v.multiplyScalar(1 - 1.2 * dt); b.m.position.addScaledVector(b.v, dt); b.m.rotation.x += b.spin * dt; b.m.rotation.y += b.spin * 0.7 * dt }
+    } })
+    this.shake(0.3)
   }
 
   shake(a) { this.shakeAmt = Math.max(this.shakeAmt, a) }

@@ -1,6 +1,6 @@
 import * as THREE from "three"
 
-// The round as the server tells it: the arena, the carrier's path, the obstacles and their state, the server clock
+// The round as the server tells it: the town, the parade route, the obstacles and their state, the server clock
 // offset and the shared action cooldown, plus every Dutch string on the HUD. Messages handled: sync (on subscribe),
 // round (every status change), object (hit points), teleport/switch (verdicts on actions), end. Hooks:
 // onRound(body, { fresh, started, live }), onEnd(msg), onAction(msg) for the player's own accepted actions,
@@ -42,7 +42,7 @@ export class Round {
     this.obstacles = new Map((body?.obstacles ?? []).map((o) => [o.key, o]))
     if (body) {
       const fresh = body.id !== prev?.id, started = body.status === "running" && prev?.status !== "running"
-      if (started) this.nextActionAt = null                          // everyone's action is ready at the start
+      if (fresh || started) this.nextActionAt = null                 // everyone's action is ready for a new town
       this.hooks.onRound?.(body, { fresh, started, live })
     }
     this.hud()
@@ -62,7 +62,7 @@ export class Round {
     return n
   }
 
-  // the carrier's motion, mirroring Game::Round on the server
+  // the float's motion, mirroring Game::Round on the server
   travelled(now = this.now()) {
     const r = this.round
     if (!r?.started_at) return 0
@@ -71,7 +71,7 @@ export class Round {
 
   progress(now) { return this.round ? this.travelled(now) / this.round.path.length : 0 }
 
-  carrierAt(now) {
+  floatAt(now) {
     const p = this.round.path, t = this.travelled(now) / p.length
     return [p.x0 + (p.x1 - p.x0) * t, p.z0 + (p.z1 - p.z0) * t]
   }
@@ -95,14 +95,14 @@ export class Round {
     const naam = r.arena.name
     if (r.status === "running") {
       const n = this.remaining
-      ronde.textContent = `Ronde ${r.id} · ${naam} · kernkop ${Math.round(this.progress() * 100)}% · ${n} ${n === 1 ? "obstakel" : "obstakels"} op de route`
+      ronde.textContent = `Ronde ${r.id} · ${naam} · optocht ${Math.round(this.progress() * 100)}% · ${n} ${n === 1 ? "obstakel" : "obstakels"} op de route`
       banner.hidden = true
     } else if (r.status === "intermission") {
       ronde.textContent = `Ronde ${r.id} · ${naam}`
-      this.showBanner(naam, `Ronde ${r.id} start over ${secs(r.next_at)} s`)
+      this.showBanner(naam, `Optocht start over ${secs(r.next_at)} s`)
     } else {
       ronde.textContent = `Ronde ${r.id} · ${naam} · afgelopen`
-      this.showBanner(r.result === "won" ? "Kernkop veilig" : "Kernkop ontploft", `Volgende arena over ${secs(r.next_at)} s`)
+      this.showBanner(r.result === "won" ? "Alaaf! Optocht binnen" : "Optocht vastgelopen", `Volgende plaats over ${secs(r.next_at)} s`)
     }
     actie.textContent = this.canAct() ? "Actie: klaar" : `Actie over ${this.countdown()}`
   }

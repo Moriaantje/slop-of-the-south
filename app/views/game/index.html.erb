@@ -14,7 +14,7 @@
     <%# game time: a full day every 6 minutes (DayNight.js) %>
     <div id="clock"></div>
     <div id="players"></div>
-    <%# the round: arena, carrier progress, obstacles left (Round.js) %>
+    <%# the round: town, parade progress, obstacles left (Round.js) %>
     <div id="ronde" class="bord bord-plaats" hidden></div>
     <%# the shared action: teleport or vehicle switch, one per minute %>
     <div id="actie" hidden></div>
@@ -31,7 +31,24 @@
 
 <div id="burn"></div>
 <canvas id="minimap" class="minimap"></canvas>
-<div id="help">W A S D of pijltjes · spatie + sturen = driften (loslaten = turbo) · shift = boost · blauwe ringen op de weg = boost · R terug op de weg · M kaart (slepen, scrollen, klik = teleport)</div>
+<div id="help">W A S D of pijltjes · spatie + sturen = driften (loslaten = turbo) · shift = boost · blauwe ringen op de weg = boost · R terug op de weg · M kaart (slepen, scrollen, klik = teleport) · N muziek</div>
+
+<%# the loading screen between rounds (LoadingScreen.js): the town's pictures, name and story while the tiles stream in %>
+<div id="laden" hidden>
+  <div class="laden-foto"></div><div class="laden-foto"></div>
+  <div class="laden-tekst">
+    <div class="laden-kop"></div>
+    <div class="laden-titel"></div>
+    <p class="laden-info"></p>
+  </div>
+  <div class="laden-voet">
+    <div class="laden-status"></div>
+    <div class="laden-balk"><i></i></div>
+    <div class="laden-bron">Foto's en tekst: Wikipedia</div>
+  </div>
+</div>
+<%# the parade's music: a hidden YouTube player (Music.js) %>
+<div id="muziek"></div>
 
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb8cf;
@@ -78,4 +95,21 @@
   .minimap.expanded { left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -50%); width: min(92vw, 92vh); height: min(92vw, 92vh);
                       cursor: crosshair; }
   .minimap.expanded:active { cursor: grabbing; }
+
+  #laden { position: fixed; inset: 0; z-index: 5; background: #0b0d12; color: #fff; overflow: hidden;
+           font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  .laden-foto { position: absolute; inset: 0; background: center / cover no-repeat; opacity: 0; transition: opacity 1.4s ease; }
+  .laden-foto.on { opacity: 1; }
+  #laden::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+                  background: linear-gradient(to top, rgba(8, 10, 16, .96) 0%, rgba(8, 10, 16, .6) 38%, rgba(8, 10, 16, 0) 70%); }
+  .laden-tekst { position: absolute; left: 8vw; right: 8vw; bottom: 17vh; z-index: 1; }
+  .laden-kop { font-size: 15px; letter-spacing: .3em; text-transform: uppercase; opacity: .8; margin-bottom: 8px; }
+  .laden-titel { font-size: clamp(44px, 8vw, 110px); font-weight: 800; line-height: .95; letter-spacing: -.02em; text-transform: uppercase; }
+  .laden-info { max-width: 64ch; font-size: 18px; line-height: 1.45; margin: 18px 0 0; opacity: .92; }
+  .laden-voet { position: absolute; left: 8vw; right: 8vw; bottom: 6vh; z-index: 1; }
+  .laden-status { font-size: 14px; letter-spacing: .2em; text-transform: uppercase; margin-bottom: 8px; min-height: 1.2em; }
+  .laden-balk { height: 4px; background: rgba(255, 255, 255, .2); border-radius: 2px; overflow: hidden; }
+  .laden-balk i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #e0241a, #f2c14e, #2a9d3a); transition: width .3s; }
+  .laden-bron { font-size: 11px; opacity: .5; margin-top: 8px; }
+  #muziek { position: fixed; left: -300px; top: -300px; width: 1px; height: 1px; opacity: .01; pointer-events: none; }
 </style>

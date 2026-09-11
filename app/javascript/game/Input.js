@@ -18,5 +18,6 @@ export class Input {
   get boost()     { return this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") }
   get reset()     { return this.consume("KeyR") }
   get toggleMap() { return this.consume("KeyM") }
+  get mute()      { return this.consume("KeyN") }
   consume(code)   { const had = this.pressed.has(code); this.pressed.delete(code); return had }
 }

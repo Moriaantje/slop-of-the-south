@@ -1,7 +1,7 @@
 // Minimap drawn from our own map data (see MapBuilder): an overview of the whole play area plus 1 km detail cells
 // fetched as you zoom in. Small: follows the car, north-up. Expanded (M): drag to pan, wheel to zoom around the
 // cursor, F fits the full bounds, a click teleports the car, Escape/M close. During a round it also shows the arena,
-// the carrier's path with the obstacles still standing on it, and the carrier itself.
+// the parade route with the obstacles still standing on it, and the float itself.
 const SMALL_SCALE = 3.5          // m/px in the corner map
 const DETAIL_SCALE = 4.5         // load 1 km detail cells when zoomed in beyond this (the corner map included)
 const MIN_SCALE = 0.4            // max zoom-in
@@ -122,7 +122,7 @@ export class Minimap {
 
   update(car, remotes, round) {
     this.car = car; this.remotes = remotes; this.round = round
-    if (round?.running) this.dirty = true                          // the carrier moves even when the car stands still
+    if (round?.running) this.dirty = true                          // the float moves even when the car stands still
     if (!this.expanded) {
       if (this.view.cx !== car.x || this.view.cz !== car.z) this.dirty = true
       this.view = { cx: car.x, cz: car.z, scale: SMALL_SCALE }
@@ -329,7 +329,7 @@ export class Minimap {
     ctx.setLineDash([])
   }
 
-  // the round: the arena square, the carrier's path with the obstacles still standing on it, and the carrier
+  // the round: the arena square, the parade route with the obstacles still standing on it, and the float
   drawArena() {
     const r = this.round?.round
     if (!r) return
@@ -349,10 +349,10 @@ export class Minimap {
       ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill()
     }
     if (r.status === "ended") return
-    const [kx, ky] = this.toPixel(...this.round.carrierAt(this.round.now()))
+    const [kx, ky] = this.toPixel(...this.round.floatAt(this.round.now()))
     ctx.fillStyle = "#f2c14e"; ctx.strokeStyle = "#111"; ctx.lineWidth = 2
     ctx.beginPath(); ctx.arc(kx, ky, this.expanded ? 7 : 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
-    if (this.expanded) { ctx.font = "bold 12px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillStyle = "#111"; ctx.fillText("kernkop", kx, ky - 9) }
+    if (this.expanded) { ctx.font = "bold 12px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillStyle = "#111"; ctx.fillText("optocht", kx, ky - 9) }
   }
 
   drawCars() {

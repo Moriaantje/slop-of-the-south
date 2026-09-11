@@ -3,7 +3,7 @@ import * as THREE from "three"
 // A sky beacon: a label with a name and a distance floating above something, with a line down to it. It is always in
 // view: it sits along the true direction from the camera, at most RANGE out (inside the draw distance), and climbs
 // with the distance — a few metres above a nearby car, hundreds of metres up for something across the province. The
-// label keeps a constant size on screen. Other players carry one, and so does the nuke carrier.
+// label keeps a constant size on screen. Other players carry one, and so does the parade float.
 const RANGE = 3000
 const FONT = "'Avenir Next', 'Segoe UI', system-ui, sans-serif"
 
