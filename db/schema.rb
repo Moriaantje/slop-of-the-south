@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_10_000011) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_11_000013) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -82,6 +82,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_000011) do
     t.index ["osm_id"], name: "index_places_on_osm_id", unique: true
   end
 
+  create_table "poles", force: :cascade do |t|
+    t.jsonb "attrs", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.geometry "geom", limit: {srid: 28992, type: "st_point"}, null: false
+    t.string "kind", null: false
+    t.string "source", null: false
+    t.string "source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geom"], name: "index_poles_on_geom", using: :gist
+    t.index ["kind"], name: "index_poles_on_kind"
+    t.index ["source", "source_id"], name: "index_poles_on_source_and_source_id", unique: true
+  end
+
   create_table "road_surfaces", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "function"
@@ -110,6 +123,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_10_000011) do
     t.float "width", default: 5.5, null: false
     t.index ["geom"], name: "index_roads_on_geom", using: :gist
     t.index ["osm_id"], name: "index_roads_on_osm_id", unique: true
+  end
+
+  create_table "traffic_signs", force: :cascade do |t|
+    t.integer "bearing"
+    t.string "black_code"
+    t.string "county_code"
+    t.datetime "created_at", null: false
+    t.string "driving_direction"
+    t.date "first_seen_on"
+    t.geometry "geom", limit: {srid: 28992, type: "st_point"}, null: false
+    t.string "image_url"
+    t.string "ndw_id", null: false
+    t.string "placement"
+    t.string "road_name"
+    t.string "rvv_code", null: false
+    t.string "side"
+    t.string "status", null: false
+    t.string "text"
+    t.string "town"
+    t.datetime "updated_at", null: false
+    t.boolean "validated", default: false, null: false
+    t.string "zone_code"
+    t.index ["geom"], name: "index_traffic_signs_on_geom", using: :gist
+    t.index ["ndw_id"], name: "index_traffic_signs_on_ndw_id", unique: true
+    t.index ["rvv_code"], name: "index_traffic_signs_on_rvv_code"
   end
 
   create_table "trees", force: :cascade do |t|

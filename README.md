@@ -48,9 +48,12 @@ Game space is RD minus a fixed origin so floats stay small:
 | Province border | **Bestuurlijke Gebieden** (Kadaster) via PDOK OGC API Features, `provinciegebied` | `rake border:fetch` stores the Limburg polygon; `/api/world` serves it simplified to 25 m. Outside it the world is a wall of flames (`game/FlameWall.js`); crossing it burns you back to your last position inside. |
 | Trees | **BGT** (Basisregistratie Grootschalige Topografie) via PDOK OGC API Features | `vegetatieobject_punt` gives every registered tree (`plus_type = boom`); woodland polygons from `begroeidterreindeel` (loofbos, naaldbos, gemengd bos, houtwal) are filled with deterministically scattered trees (`ST_GeneratePoints`). `rake bgt:fetch bgt:import`. |
 | Terrain | **AHN** (Actueel Hoogtebestand Nederland) DTM via PDOK WCS | OSM has no elevation. AHN is 0.5 m lidar; the WCS resamples it to the 10 m grid on request, `gdal_fillnodata` fills the holes under buildings and water. Zuid-Limburg is genuinely hilly — 27 m at the Maas to 114 m on the plateau within the phase-1 box. |
+| Traffic signs | **NDW** Verkeersborden (Nationaal Dataportaal Wegverkeer, `traffic-signs/v4/current-state`) | The API answers with the whole country as one 1.2 GB GeoJSON (its filters are ignored), so `rake ndw:fetch` downloads it once and `rake ndw:import` streams it through `jq --stream` into `traffic_signs` for the world bbox (227k signs in Limburg). Every sign face is painted from its RVV code and value on a canvas (`game/Signs.js`: A1 speed discs, B6 yield, G11 cycle path, E4 parking, H1 town entry, J warnings, onderborden with their text …) and faces against the traffic it applies to (`bearing` + 180°). Signs at one spot share a pole. |
+| Lamp posts | **BGT** `Paal` with `plus-type = lichtmast` (bulk extracts, `BGT_BULK_TYPES=paal rake bgt:bulk_fetch bgt:paal_import`) | 101k masts in Limburg, arm turned towards the nearest road, 9 m on main roads, 6 m elsewhere. `Paal` is an optional IMGeo object: the Parkstad municipalities (Heerlen, Kerkrade, Landgraaf, Brunssum …) deliver none; there OSM `highway=street_lamp` (`rake osm:pbf_points`) is the sparse fallback. |
+| Traffic lights | **BGT** `Paal` with `plus-type = verkeersregelinstallatiepaal` (990 poles) + OSM `highway=traffic_signals` nodes (2.4k) | Each BGT pole becomes a signal head facing the traffic that approaches it (side of the road decides the direction); where BGT has no poles the OSM node gets one pole per approaching road. Heads run a shared 40 s cycle on the wall clock, phased by axis, so all players see the same colours. Live iVRI state via Talking Traffic is a later stretch goal. |
 
 
-Everything above is open data. Keep attribution ("© OpenStreetMap contributors", "AHN", "3D BAG", "BGT")
+Everything above is open data. Keep attribution ("© OpenStreetMap contributors", "AHN", "3D BAG", "BGT", "NDW")
 in the game's about screen.
 
 ### 1.4 Pipeline
@@ -66,6 +69,7 @@ in the game's about screen.
                                             ├── meshes[]         {id, roof, o, f: [[label, ring…]…]} (3D BAG LoD2.2 faces, cm offsets)
                                             ├── trees[]          [x, z, kind, height]   (BGT; kind 0 street tree, 1 broadleaf wood, 2 conifer, 3 fruit tree)
                                             ├── cover[]          [code, ring…]          (BGT land cover, dm offsets from the tile corner; painted)
+                                            ├── furniture        {lamps: [x, z, dir, h], signals: [x, z, face, group], signs: [x, z, face, code, black?, text?]}
                                             └── biome            "akkerland" | "woonwijk" | …
 
 Tiles are static JSON served by nginx/Rails' static file server — no DB hit while playing.
@@ -143,6 +147,11 @@ bin/rails bag3d:fetch          # 3D BAG GeoPackage tiles for the box → data/ba
 bin/rails bag3d:import         # → PostGIS buildings (LoD1.3 parts) and building_meshes (LoD2.2)
 bin/rails bgt:bulk_fetch       # BGT extracts per municipality via PDOK's download API → data/bgt/bulk/*.zip (~5 GB)
 bin/rails bgt:bulk_import      # → land_covers (terrain, pavement, water) and trees (registered, woods, orchards)
+BGT_BULK_TYPES=paal bin/rails bgt:bulk_fetch   # lamp posts, signal poles, sign posts → data/bgt/bulk/*-paal.zip (18 MB)
+bin/rails bgt:paal_import      # → poles (101k lamp posts, 990 signal poles …)
+bin/rails osm:pbf_points       # → poles: OSM traffic_signals nodes, signalised crossings, fallback street lamps
+bin/rails ndw:fetch            # NDW traffic-sign register, all of NL (1.2 GB) → data/ndw/current-state.json
+bin/rails ndw:import           # → traffic_signs inside the world bbox (227k), streamed with jq
 bin/rails dem:fetch            # AHN terrain model from PDOK WCS, chunked → data/dem_raw.tif (10 m)
 bin/rails dem:build            # fill holes, convert → data/dem.raw + dem.json (binary, read lazily)
 bin/rails tiles:build          # → public/tiles/*.json for every tile inside the province (~9k)

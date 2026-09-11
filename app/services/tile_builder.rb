@@ -20,6 +20,7 @@ class TileBuilder
       buildings: buildings_for(tx, ty, skip: meshes.map { _1[:id] }.to_set),
       meshes: meshes,
       trees: trees_for(tx, ty),
+      furniture: FurnitureBuilder.new.build(tx, ty),
       cover: cover_for(tx, ty, x0, y0 + s),
       biome: LandCover.biome(LandCover.shares_in_tile(tx, ty))
     }

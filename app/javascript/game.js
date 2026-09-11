@@ -1,6 +1,7 @@
 import * as THREE from "three"
 import { World } from "game/World"
 import { ChunkManager } from "game/ChunkManager"
+import { updateSignals } from "game/Furniture"
 import { Vehicle } from "game/Vehicle"
 import { Input } from "game/Input"
 import { Network } from "game/Network"
@@ -54,6 +55,7 @@ async function main() {
     const dt = Math.min(timer.getDelta(), 1 / 20)
 
     chunks.update(car.x, car.z)
+    updateSignals()
     if (input.toggleMap) minimap.toggle()
     if (chunks.ready(car.x, car.z)) {
       if (input.reset) { car.reset(config.spawn); placed = false }

@@ -4,6 +4,8 @@ import { buildRoads } from "game/Roads"
 import { buildBuildings } from "game/Buildings"
 import { buildBuildingMeshes } from "game/BuildingMeshes"
 import { buildTrees } from "game/Trees"
+import { buildLamps, buildSignals } from "game/Furniture"
+import { buildSigns } from "game/Signs"
 import { paintCover, buildWater } from "game/Cover"
 import { ROAD_LIFT } from "game/Roads"
 
@@ -88,6 +90,10 @@ export class ChunkManager {
       if (meshes) group.add(meshes)
       const trees = buildTrees(data.trees, (x, z) => terrain.heightAt(x, z))
       if (trees) group.add(trees)
+      if (data.furniture) {                                       // lamp posts, traffic lights, traffic signs
+        const ground = (x, z) => roadHeight(data.roads, x, z) ?? terrain.heightAt(x, z)
+        for (const part of [buildLamps(data.furniture.lamps, ground), buildSignals(data.furniture.signals, ground), buildSigns(data.furniture.signs, ground)]) if (part) group.add(part)
+      }
       this.scene.add(group)
       this.tiles.set(key, { group, terrain, roads: data.roads, biome: data.biome })
     } catch (e) {
@@ -99,6 +105,7 @@ export class ChunkManager {
   dispose(t) {
     this.scene.remove(t.group)
     t.group.traverse((o) => {
+      o.userData.onDispose?.()                                             // e.g. traffic lights leave the animation set
       if (o.isInstancedMesh) o.dispose()                                   // instance buffers
       if (o.geometry && !o.geometry.__shared) o.geometry.dispose()
       if (o.material && !o.material.__shared) { o.material.map?.dispose(); o.material.dispose() }
