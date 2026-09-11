@@ -46,10 +46,10 @@ async function main() {
   const chunks  = new ChunkManager(world.scene, config, { onTile: (t) => { index.indexTile(t); pickups.addTile(t) }, onDrop: (t) => { index.dropTile(t); pickups.dropTile(t) } })
   index.heightAt = (x, z) => chunks.heightAt(x, z)
   world.setHeightAt((x, z) => chunks.heightAt(x, z))
-  const combat  = new Combat({ index, effects, send: (action, data) => net.send(action, data) })
   const input   = new Input()
   const car     = new Vehicle(config.spawn, vehicleSpec(localStorage.getItem("voertuig") ?? "trike"))
   let carFx     = new VehicleFx(car.mesh, effects.smoke)
+  const combat  = new Combat({ scene: world.scene, index, effects, heightAt: (x, z) => chunks.heightAt(x, z), car, send: (action, data) => net.send(action, data) })
   const remotes = new RemoteCars(world.scene, effects.smoke)
   const dayNight = new DayNight(world)
   const parade  = new Parade(world.scene)
@@ -102,7 +102,7 @@ async function main() {
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
   const net = new Network({ room: "main", onMessage: (m) => {
     if (m.type === "move" || m.type === "join" || m.type === "leave") { if (m.id !== playerId) remotes.receive(m); return }
-    if (m.type === "fire") return
+    if (m.type === "fire") { if (m.id !== playerId) combat.remoteFire(m, remotes.get(m.id)?.mesh); return }
     round.receive(m)
   } })
   const locator = new Locator(config.places)
@@ -120,7 +120,7 @@ async function main() {
   if (wall) world.scene.add(wall.mesh)
   let lastInside = null       // last position inside the border, to fall back to after burning
 
-  const kmh = el("kmh"), playersEl = el("players"), clockEl = el("clock")
+  const kmh = el("kmh"), playersEl = el("players"), clockEl = el("clock"), cooldownBar = el("cooldown-bar")
   const boostEl = el("boost"), boostFill = el("boost-fill"), driftEl = el("drift"), pipsEl = el("drift-pips")
   let shownLevel = -1, shownDrift = null, lastKmh = -1, lastMeter = -1, lastBoostOn = null   // DOM writes only on change
   const onPickup = (p) => {
@@ -168,10 +168,12 @@ async function main() {
       combat.enabled = round.running
       combat.collide(car, dt)
       car.settle(heightAt)
+      combat.abilities(car, input, dt)
       carFx.update(car, dt)
       pickups.collect(car, tileIndex, onPickup)
     }
     pickups.update(dt)
+    combat.projectiles(dt)
     // the edge of the world: cross the province border and you burn back to where you were
     if (wall) {
       wall.update(timer.getElapsed())
@@ -215,6 +217,7 @@ async function main() {
 
     const shownKmh = Math.round(Math.hypot(car.vx, car.vz) * 3.6)
     if (shownKmh !== lastKmh) { lastKmh = shownKmh; kmh.textContent = shownKmh }
+    cooldownBar.style.transform = `scaleX(${(1 - combat.cooldownFraction).toFixed(3)})`
     const meter = Math.round(car.boostMeter * 200) / 200
     if (meter !== lastMeter) { lastMeter = meter; boostFill.style.transform = `scaleX(${meter})` }
     const boostOn = car.boostPower > 0.3

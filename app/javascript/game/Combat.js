@@ -1,20 +1,39 @@
+import * as THREE from "three"
 import { distTo } from "game/Destructibles"
 
-// What the player's vehicle does to the world: ramming, driving over rubble and (later) the weapons. Everything
-// here is local prediction plus messages: damage is queued per object and sent to the server in `hit` batches;
-// the server decides when something actually falls (Destructibles.apply).
+// What the player's vehicle does to the world: ramming, driving over rubble, and the six tricks on E: missiles
+// and slugs that fly and burst, a sticky charge on a fuse, the monster truck's jump, the crane's wrecking ball and
+// the bulldozer's blade (which is just ramming with a big number). Everything here is local prediction plus
+// messages: damage is queued per object and sent to the server in `hit` batches, the server decides when something
+// falls (Destructibles.apply), and `fire` tells the other players what to draw. Explosions also shove nearby cars.
+const GRAVITY = 20                   // m/s² for jumps and knockback hops, arcade-heavy
+const STEP = 1.5                     // metres a shot may travel between hit tests
+const shotMats = { missile: new THREE.MeshStandardMaterial({ color: 0xd8d8d0, metalness: 0.5, roughness: 0.4 }), slug: new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.7, roughness: 0.5 }) }
+const chargeMat = new THREE.MeshStandardMaterial({ color: 0xb01010, emissive: 0xff2020, emissiveIntensity: 1 })
+const missileGeo = (() => { const body = new THREE.CylinderGeometry(0.12, 0.12, 1.1, 8); body.rotateX(Math.PI / 2); return body })()
+const slugGeo = new THREE.SphereGeometry(0.28, 10, 8)
+const chargeGeo = new THREE.BoxGeometry(0.5, 0.35, 0.5)
+
 export class Combat {
-  constructor({ index, effects, send }) {
+  constructor({ scene, index, effects, heightAt, car, send }) {
+    this.scene = scene
     this.index = index
     this.effects = effects
+    this.heightAt = heightAt
+    this.car = car
     this.send = send
     this.pending = new Map()        // key → { damage, max } since the last flush
     this.lastRam = new WeakMap()    // object → time of the last ram, so a standing car does not hammer it
     this.enabled = false            // only while a round is running
+    this.shots = []                 // { mesh, x, y, z, vx, vy, vz, gravity, life, r, dmg, own }
+    this.charge = null              // the brommer's sticky bomb, one at a time
+    this.swing = null               // the crane's swing in progress
+    this.cd = 0                     // seconds until the trick is ready again
   }
 
   // between car.integrate() and car.settle(): the bumper corners against the index. A hit pushes the car out along
-  // the contact normal and bounces it; pushing vehicles grind on through; rubble only slows and takes chipping.
+  // the contact normal and bounces it; pushing vehicles grind on through; rubble only slows and takes chipping; an
+  // airborne car clears posts and trees but not houses.
   collide(car, dt) {
     const spec = car.spec, f = car.forward(), rx = -f.z, rz = f.x
     const v = car.speed, along = v >= 0 ? spec.length / 2 : -spec.length / 2
@@ -25,6 +44,7 @@ export class Combat {
       const hit = this.index.hitPoint(px, pz, 0.3)
       if (!hit) continue
       const { obj, nx, nz, depth } = hit
+      if (car.vy !== null && !obj.rings) continue
       if (obj.state === 1) { car.speed *= 1 - 2.5 * dt; this.queue(obj, spec.clear * Math.abs(v) * 4 * dt); continue }
       if (spec.push && Math.abs(v) > spec.pushMin) { car.speed *= 1 - 1.5 * dt; this.queue(obj, spec.ram * Math.abs(v) * 10 * dt); this.effects.shake(0.05); continue }
       car.x += nx * depth; car.z += nz * depth
@@ -46,11 +66,118 @@ export class Combat {
     return true
   }
 
-  // damage everything standing within r of (x, z), falling off to half at the edge
-  explode(x, y, z, r, dmg) {
-    this.effects.explosion(x, y, z, r)
-    this.index.near(x, z, r, (obj) => this.queue(obj, dmg * (1 - 0.5 * distTo(x, z, obj) / r)))
+  // ---- the tricks --------------------------------------------------------------------------------------------------
+
+  // E fires the vehicle's trick when its cooldown has run out; landings and swings in progress resolve here too
+  abilities(car, input, dt) {
+    this.cd = Math.max(0, this.cd - dt)
+    if (car.landed) { car.landed = false; this.explode(car.x, car.y + 0.5, car.z, 4, 90, true, false); this.effects.shake(0.5) }
+    if (this.swing) this.swingStep(car, dt)
+    const a = car.spec.ability
+    if (a.kind === "none" || !input.ability || this.cd > 0 || !this.enabled) return
+    const f = car.forward(), nose = car.spec.length / 2 + 0.6
+    switch (a.kind) {
+      case "missile": this.shoot("missile", car.x + f.x * nose, car.y + 0.9, car.z + f.z * nose, f.x * 60, 0, f.z * 60, 0, 3, 6, 70, true); break
+      case "slug":    this.shoot("slug", car.x + f.x * 4, car.y + 2.2, car.z + f.z * 4, f.x * 45, 6, f.z * 45, 9.8, 4, 3, 150, true); break
+      case "sticky":  if (this.charge) return; this.plant(car.x, car.y, car.z, true); break
+      case "jump":    if (car.vy !== null) return; car.jump(9); break
+      case "ball":    this.swing = { t: 0, hit: false, mesh: car.mesh, own: true }; break
+    }
+    this.cd = a.cooldown
+    this.send("fire", { kind: a.kind, x: car.x, y: car.y, z: car.z, yaw: car.yaw })
   }
+
+  get cooldownFraction() { const c = this.car?.spec.ability.cooldown; return c ? this.cd / c : 0 }
+
+  shoot(kind, x, y, z, vx, vy, vz, gravity, life, r, dmg, own) {
+    const mesh = new THREE.Mesh(kind === "missile" ? missileGeo : slugGeo, shotMats[kind])
+    mesh.position.set(x, y, z)
+    if (kind === "missile") mesh.lookAt(x + vx, y + vy, z + vz)
+    this.scene.add(mesh)
+    this.shots.push({ mesh, x, y, z, vx, vy, vz, gravity, life, r, dmg, own })
+  }
+
+  plant(x, y, z, own) {
+    const mesh = new THREE.Mesh(chargeGeo, chargeMat)
+    mesh.position.set(x, y + 0.2, z)
+    this.scene.add(mesh)
+    const charge = { mesh, x, y, z, t: 3, own }
+    if (own) this.charge = charge
+    this.shots.push({ ...charge, fuse: true })
+  }
+
+  // every frame: shots fly in substeps no longer than STEP and burst on the first object or the ground; charges
+  // blink down their fuse
+  projectiles(dt) {
+    for (let i = this.shots.length - 1; i >= 0; i--) {
+      const s = this.shots[i]
+      if (s.fuse) {
+        s.t -= dt
+        s.mesh.material.emissiveIntensity = 1 + Math.max(0, Math.sin(performance.now() / (60 + 100 * s.t)))
+        if (s.t <= 0) { this.explode(s.x, s.y + 0.5, s.z, 10, 120, s.own); this.drop(i); if (s.own) this.charge = null }
+        continue
+      }
+      const n = Math.max(1, Math.ceil(Math.hypot(s.vx, s.vy, s.vz) * dt / STEP)), h = dt / n
+      let burst = false
+      for (let k = 0; k < n && !burst; k++) {
+        s.vy -= s.gravity * h
+        s.x += s.vx * h; s.y += s.vy * h; s.z += s.vz * h
+        const ground = this.heightAt(s.x, s.z)
+        const hit = this.index.hitPoint(s.x, s.z, 0.5)
+        if (s.y <= ground || (hit && s.y <= ground + (hit.obj.h ?? 3) + 0.5)) burst = true
+      }
+      if (burst) { this.explode(s.x, s.y, s.z, s.r, s.dmg, s.own); this.drop(i); continue }
+      if ((s.life -= dt) <= 0) { this.drop(i); continue }
+      s.mesh.position.set(s.x, s.y, s.z)
+      if (s.gravity) s.mesh.lookAt(s.x + s.vx, s.y + s.vy, s.z + s.vz)
+    }
+  }
+
+  drop(i) { this.scene.remove(this.shots[i].mesh); this.shots.splice(i, 1) }
+
+  // the boom dips forward and comes back over 0.6 s; the ball lands eight metres ahead at the bottom of the swing
+  swingStep(car, dt) {
+    const sw = this.swing, anim = sw.mesh.userData.anim
+    sw.t += dt
+    const k = Math.min(1, sw.t / 0.6)
+    if (anim?.pivot) anim.pivot.rotation.x = 0.75 - 0.55 * Math.sin(k * Math.PI)
+    if (!sw.hit && sw.t >= 0.3) {
+      sw.hit = true
+      const yaw = sw.mesh.rotation.y, fx = -Math.sin(yaw), fz = -Math.cos(yaw)
+      const x = sw.mesh.position.x + fx * 8, z = sw.mesh.position.z + fz * 8
+      this.explode(x, this.heightAt(x, z) + 1, z, 8, 500, sw.own, !sw.own)
+    }
+    if (k >= 1) { if (anim?.pivot) anim.pivot.rotation.x = 0.75; this.swing = null }
+  }
+
+  // damage everything standing within r of (x, z), falling off to half at the edge, and shove the player's car if it
+  // stands close; `own` false replays another player's shot: looks and knockback only, the damage is theirs. A
+  // landing or a swing of your own does not shove you (`shove` false), or the monster truck would bounce forever.
+  explode(x, y, z, r, dmg, own = true, shove = true) {
+    this.effects.explosion(x, y, z, r)
+    if (own) this.index.near(x, z, r, (obj) => this.queue(obj, dmg * (1 - 0.5 * distTo(x, z, obj) / r)))
+    const car = this.car
+    if (!car || !shove) return
+    const d = Math.hypot(car.x - x, car.z - z)
+    if (d < 1.5 * r) {
+      const k = (1 - d / (1.5 * r)) * Math.min(14, dmg / 10)
+      car.kick((car.x - x) / (d || 1) * k, (car.z - z) / (d || 1) * k)
+      if (k > 4 && car.vy === null) car.jump(Math.min(6, k * 0.5))
+    }
+  }
+
+  // another player's trick, as seen from here
+  remoteFire(msg, mesh) {
+    const fx = -Math.sin(msg.yaw), fz = -Math.cos(msg.yaw)
+    switch (msg.kind) {
+      case "missile": this.shoot("missile", msg.x + fx * 2, msg.y + 0.9, msg.z + fz * 2, fx * 60, 0, fz * 60, 0, 3, 6, 70, false); break
+      case "slug":    this.shoot("slug", msg.x + fx * 4, msg.y + 2.2, msg.z + fz * 4, fx * 45, 6, fz * 45, 9.8, 4, 3, 150, false); break
+      case "sticky":  this.plant(msg.x, msg.y, msg.z, false); break
+      case "ball":    if (mesh && !this.swing) this.swing = { t: 0, hit: false, mesh, own: false }; break
+    }
+  }
+
+  // ---- the hit queue -----------------------------------------------------------------------------------------------
 
   queue(obj, dmg) {
     if (!this.enabled || dmg < 0.5 || obj.state === 2) return
@@ -69,5 +196,9 @@ export class Combat {
     for (let i = 0; i < hits.length; i += 32) this.send("hit", { hits: hits.slice(i, i + 32) })
   }
 
-  reset() { this.pending.clear() }
+  reset() {
+    this.pending.clear()
+    while (this.shots.length) this.drop(this.shots.length - 1)
+    this.charge = null; this.swing = null; this.cd = 0
+  }
 }

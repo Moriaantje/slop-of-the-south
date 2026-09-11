@@ -69,9 +69,16 @@ export class Vehicle {
     this.drifting = false; this.driftDir = 0; this.driftMild = false; this.driftT = 0; this.chargeLevel = 0
     this.boosting = false; this.burstT = 0; this.boostPower = 0
     this.accLong = 0; this.accLat = 0; this.wheelAngle = 0
+    this.vy = null; this.airY = 0; this.landed = false                 // airborne: vertical speed and height, null on the ground
+    this.kickX = 0; this.kickZ = 0                                      // knockback, world m/s, dies away in a second
     this._dt = 1 / 60; this._speedOut = 0
     this.susp.reset()
   }
+
+  // leave the ground with vertical speed v (the monster truck's trick, and the hop an explosion gives)
+  jump(v) { if (this.vy === null) { this.vy = v; this.airY = this.y } }
+
+  kick(x, z) { this.kickX += x; this.kickZ += z }
 
   forward() { return { x: -Math.sin(this.yaw), z: -Math.cos(this.yaw) } }
 
@@ -83,6 +90,10 @@ export class Vehicle {
     if (this.speed !== this._speedOut) this.lateral *= 0.3          // Combat bounced or slowed us: kill most of the slide
     const n = Math.max(1, Math.ceil(dt / SUBSTEP)), h = dt / n, v0 = this.speed
     for (let i = 0; i < n; i++) this.step(h, input)
+    this.x += this.kickX * dt; this.z += this.kickZ * dt
+    const fade = Math.exp(-dt * 2.3)
+    this.kickX *= fade; this.kickZ *= fade
+    if (this.vy !== null) { this.vy -= 20 * dt; this.airY += this.vy * dt }
     this.accLong = expDamp(this.accLong, (this.speed - v0) / dt, T.susp.accelSmooth, dt)
     this.accLat = expDamp(this.accLat, -this.speed * this.yawRate, T.susp.accelSmooth, dt)   // +right
     this._speedOut = this.speed
@@ -185,8 +196,14 @@ export class Vehicle {
     this.boostPower = expDamp(this.boostPower, this.boosting ? 1 : 0, B.powerSmooth, h)
   }
 
-  // Terrain contact and body attitude via the suspension; car.y stays the ground height under the centre
-  settle(heightAt) { this.susp.update(this, heightAt, this._dt) }
+  // Terrain contact and body attitude via the suspension; car.y stays the ground height under the centre, and an
+  // airborne car floats its mesh above it until it comes back down
+  settle(heightAt) {
+    this.susp.update(this, heightAt, this._dt)
+    if (this.vy === null) return
+    if (this.airY <= this.y && this.vy < 0) { this.vy = null; this.landed = true }
+    else this.mesh.position.y += this.airY - this.y
+  }
 
   get smoking() { return this.drifting && Math.abs(this.slip) > T.fx.smokeSlip }
 
