@@ -25,6 +25,7 @@ import { TUNING } from "game/Tuning"
 import { configure as configureTextures } from "game/Textures"
 import { SkyEnv } from "game/EnvMap"
 import { Blob } from "game/Shadows"
+import { Assets } from "game/Assets"
 
 async function main() {
   const config = await (await fetch("/api/world")).json()
@@ -57,6 +58,7 @@ async function main() {
   const dayNight = new DayNight(world)
   const skyEnv  = new SkyEnv(world, dayNight)               // the sky baked into an environment map for the materials
   const shadow  = new Blob(world.scene)                      // the contact shadow under the player's car
+  const assets  = new Assets()                               // glTF models for dragons, the mech and the townsfolk
   const loading = new LoadingScreen(el("laden"))
   const burnEl = el("burn")
   const burn = (ms) => { burnEl.classList.add("on"); setTimeout(() => burnEl.classList.remove("on"), ms) }
@@ -98,7 +100,7 @@ async function main() {
     },
     onHeal: () => { chunks.reload(); index.resetState(); combat.reset() },
   })
-  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
+  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))

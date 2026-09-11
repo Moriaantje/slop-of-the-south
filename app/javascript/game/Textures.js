@@ -1,4 +1,5 @@
 import * as THREE from "three"
+import { off } from "game/Flags"
 
 // Image → texture plumbing shared by the aerial photos and the photo materials. Images are fetched (so a load can be
 // aborted when its tile is dropped) and decoded off the main thread with createImageBitmap; the bitmap is flipped on
@@ -35,3 +36,37 @@ export function disposeTexture(tex) {
   tex.dispose()
   tex.image?.close?.()
 }
+
+// Photo-scanned PBR material sets (ambientCG, CC0) under public/textures/<set>/{color,normal,rough}.jpg. The material
+// is created synchronously with the flat colour the game used to paint, so geometry never waits; the maps are
+// assigned when they arrive. UVs are in metres: `size` is how many metres one repeat of the photo covers. Shared —
+// callers never dispose these. ?pbr=0 keeps the flat colours (and the Node harness, which has no createImageBitmap).
+const PBR_ON = !off("pbr") && typeof createImageBitmap !== "undefined"
+const sets = new Map()
+
+export function pbr(set, { color = 0xffffff, tint = 0xffffff, size = 2, roughness = 0.95, normalScale = 1, ...extra } = {}) {
+  const key = `${set}:${color}:${tint}:${size}:${JSON.stringify(extra)}`
+  if (sets.has(key)) return sets.get(key)
+  const m = new THREE.MeshStandardMaterial({ color, roughness, ...extra })
+  m.__shared = true
+  m.userData.set = set
+  sets.set(key, m)
+  if (PBR_ON) {
+    const rep = 1 / size
+    Promise.all([
+      loadBitmap(versioned(`/textures/${set}/color.jpg`)),
+      loadBitmap(versioned(`/textures/${set}/normal.jpg`)),
+      loadBitmap(versioned(`/textures/${set}/rough.jpg`)),
+    ]).then(([c, n, r]) => {
+      m.map = bitmapTexture(c, { srgb: true, repeat: rep })
+      m.normalMap = bitmapTexture(n, { srgb: false, repeat: rep })
+      m.normalScale.set(normalScale, normalScale)
+      m.roughnessMap = bitmapTexture(r, { srgb: false, repeat: rep })
+      m.roughness = 1
+      m.color.set(tint)                     // the photo carries the colour now; tint only shifts it (red cycle asphalt)
+      m.needsUpdate = true
+    }).catch((err) => console.warn(`textures/${set}: ${err.message}`))
+  }
+  return m
+}
+export const pbrEnabled = () => PBR_ON
