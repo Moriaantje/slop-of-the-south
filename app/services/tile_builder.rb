@@ -61,6 +61,7 @@ class TileBuilder
       # height even where the DEM and the building ground level disagree a little. OSM only has a relative height.
       height = b["roof_height"] ? b["roof_height"].to_f - base : b["height"].to_f
       {
+        id: b["id"],
         base: base.round(2),
         height: height.clamp(2.5, 200.0).round(2),
         kind: b["kind"],
@@ -72,15 +73,17 @@ class TileBuilder
 
   # 3D BAG LoD2.2 surfaces as faces the client triangulates: per building an origin (game units) and faces
   # [label, outer_ring, hole_ring, ...] with vertices as flat centimetre offsets [dx, dy, dz, ...] from the origin.
-  # Ground faces are dropped (the terrain covers them). A building whose ground level lies above the DEM is
-  # lowered onto the terrain so it never floats.
+  # Ground faces are not drawn (the terrain covers them); their outlines go out as `fp`, the 2D footprint rings the
+  # client collides with. A building whose ground level lies above the DEM is lowered onto the terrain so it
+  # never floats.
   def meshes_for(tx, ty)
     BuildingMesh.in_tile(tx, ty).filter_map do |m|
       polys = m["geojson"]["coordinates"]
       next if polys.blank?
       labels = m["labels"].is_a?(String) ? m["labels"].scan(/\d+/).map(&:to_i) : m["labels"]
       ground = polys.flat_map { |rings| rings.first.map { _1[2] } }.min
-      footprint = polys.each_with_index.filter_map { |rings, i| rings.first if labels[i] == BuildingMesh::LABEL_GROUND }.flatten(1)
+      ground_rings = polys.each_with_index.filter_map { |rings, i| rings.first if labels[i] == BuildingMesh::LABEL_GROUND }
+      footprint = ground_rings.flatten(1)
       footprint = polys.flat_map(&:first) if footprint.empty?
       base = footprint.map { |x, y, _| @heights.sample(x, y) }.min
       dz = [ base - ground, 0.0 ].min
@@ -91,8 +94,15 @@ class TileBuilder
         [ labels[i] || BuildingMesh::LABEL_WALL, *rings.map { |ring| ring_offsets(ring, ox, oy, oz, dz) } ]
       end
       next if faces.empty?
-      { id: m["bag_id"].split(".").last, roof: m["roof_type"], o: [ ox, oy, oz ], f: faces }
+      { id: m["bag_id"].split(".").last, roof: m["roof_type"], o: [ ox, oy, oz ], f: faces,
+        fp: (ground_rings.map { ring_xz(_1) } if ground_rings.any?) }.compact
     end
+  end
+
+  # ring of RD [x, y, z] → flat [x, z, ...] in game units (closing vertex dropped)
+  def ring_xz(ring)
+    pts = ring.first == ring.last ? ring[0...-1] : ring
+    pts.flat_map { |x, y, _| World.to_game(x, y).map { _1.round(2) } }
   end
 
   # ring of RD [x, y, z] → flat centimetre offsets from the origin (closing vertex dropped)

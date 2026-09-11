@@ -31,8 +31,9 @@ module World
     end
   end
 
-  # RD metres → game units (x east, z south)
+  # RD metres → game units (x east, z south), and back
   def self.to_game(x, y) = [ x - ORIGIN_X, -(y - ORIGIN_Y) ]
+  def self.to_rd(gx, gz)  = [ gx + ORIGIN_X, ORIGIN_Y - gz ]
 
   # Road widths (metres) by OSM highway tag
 ROAD_WIDTHS = {
