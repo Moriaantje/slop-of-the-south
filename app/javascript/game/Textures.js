@@ -2,9 +2,11 @@ import * as THREE from "three"
 import { off } from "game/Flags"
 
 // Image → texture plumbing shared by the aerial photos and the photo materials. Images are fetched (so a load can be
-// aborted when its tile is dropped) and decoded off the main thread with createImageBitmap; the bitmap is flipped on
-// decode and the texture told not to flip, so the image's top row lands at v = 1 — north on a terrain tile.
+// aborted when its tile is dropped) and decoded asynchronously through an <img> (img.decode(), which every browser
+// supports — createImageBitmap's orientation options do not survive Safari). The texture keeps three's default flip,
+// so the image's top row lands at v = 1 — north on a terrain tile.
 let version = 0
+export const textureStats = { ok: 0, failed: 0, last: "" }     // for the ?debug=1 overlay
 
 // called once from game.js with /api/world's assets_version, the cache-buster for public/textures and public/models
 export function configure({ version: v }) { version = v ?? 0 }
@@ -12,15 +14,24 @@ export const assetsVersion = () => version
 export const versioned = (url) => `${url}${url.includes("?") ? "&" : "?"}v=${version}`
 
 export async function loadBitmap(url, { signal } = {}) {
-  const res = await fetch(url, { signal, mode: "cors", credentials: "omit" })
-  if (!res.ok) throw new Error(`${url}: ${res.status}`)
-  const blob = await res.blob()
-  return createImageBitmap(blob, { imageOrientation: "flipY", colorSpaceConversion: "none", premultiplyAlpha: "none" })
+  try {
+    const res = await fetch(url, { signal, mode: "cors", credentials: "omit" })
+    if (!res.ok) throw new Error(`${url}: ${res.status}`)
+    const blob = await res.blob()
+    const img = new Image()
+    img.src = URL.createObjectURL(blob)
+    await img.decode()
+    textureStats.ok++
+    return img
+  } catch (err) {
+    if (err?.name !== "AbortError") { textureStats.failed++; textureStats.last = `${url.split("?")[0]}: ${err.message ?? err}` }
+    throw err
+  }
 }
 
-export function bitmapTexture(bitmap, { srgb = true, repeat = null, anisotropy = 4 } = {}) {
-  const tex = new THREE.Texture(bitmap)
-  tex.flipY = false
+export function bitmapTexture(image, { srgb = true, repeat = null, anisotropy = 4 } = {}) {
+  const tex = new THREE.Texture(image)
+  tex.flipY = true
   tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace
   if (repeat) { tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(repeat, repeat) }
   tex.anisotropy = anisotropy
@@ -34,14 +45,16 @@ export function bitmapTexture(bitmap, { srgb = true, repeat = null, anisotropy =
 export function disposeTexture(tex) {
   if (!tex) return
   tex.dispose()
-  tex.image?.close?.()
+  const img = tex.image
+  if (img?.src?.startsWith?.("blob:")) URL.revokeObjectURL(img.src)
+  img?.close?.()
 }
 
 // Photo-scanned PBR material sets (ambientCG, CC0) under public/textures/<set>/{color,normal,rough}.jpg. The material
 // is created synchronously with the flat colour the game used to paint, so geometry never waits; the maps are
 // assigned when they arrive. UVs are in metres: `size` is how many metres one repeat of the photo covers. Shared —
 // callers never dispose these. ?pbr=0 keeps the flat colours (and the Node harness, which has no createImageBitmap).
-const PBR_ON = !off("pbr") && typeof createImageBitmap !== "undefined"
+const PBR_ON = !off("pbr") && typeof Image !== "undefined" && typeof fetch !== "undefined"
 const sets = new Map()
 
 export function pbr(set, { color = 0xffffff, tint = 0xffffff, size = 2, roughness = 0.95, normalScale = 1, ...extra } = {}) {

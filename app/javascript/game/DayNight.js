@@ -78,7 +78,7 @@ export class DayNight {
     u.glowStrength.value = dusk * 1.3
     u.stars.value = smoothstep(0.16, 0.42, -elev)              // stars only once the sun is well below the horizon
     w.scene.fog.color.copy(u.horizon.value)                     // the ground fades into the horizon, not into a flat sky
-    w.scene.fog.near = 600 - 300 * (1 - daylight); w.scene.fog.far = 2200 - 900 * (1 - daylight)
+    w.scene.fog.near = 900 - 450 * (1 - daylight); w.scene.fog.far = 2300 - 900 * (1 - daylight)
 
     // the sun: east at sunrise, high in the south at noon, west at sunset; at night a faint moon from the other side
     const up = Math.max(elev, 0.02), A = w.sunAnchor ?? ZERO
@@ -105,7 +105,7 @@ export class DayNight {
     this.moonSprite.position.copy(cam).addScaledVector(this._dir, SKY_DISTANCE)
     this.moonSprite.material.opacity = smoothstep(0.02, 0.2, -elev)
     w.sun.color.copy(daylight > 0.02 ? this._c.copy(SUN_DAY).lerp(SUN_LOW, dusk) : MOON)
-    w.sun.intensity = 1.6 * daylight + 0.12 * (1 - daylight)
+    w.sun.intensity = T.look.sun * daylight + 0.12 * (1 - daylight)
     w.hemi.color.copy(this._c.copy(NIGHT_HEMI).lerp(DAY_HEMI, daylight))
     w.hemi.groundColor.copy(this._c.copy(NIGHT_GROUND).lerp(DAY_GROUND, daylight))
     w.hemi.intensity = (0.22 + 0.68 * daylight) * T.look.hemi

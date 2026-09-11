@@ -10,6 +10,10 @@ import { Spells } from "game/Spells"
 import { Dragons } from "game/Dragons"
 import { Npcs } from "game/Npcs"
 import { Quests } from "game/Quests"
+import { Clouds } from "game/Clouds"
+import { TREE_UNIFORMS } from "game/Trees"
+import { flag } from "game/Flags"
+import { textureStats } from "game/Textures"
 import { Input } from "game/Input"
 import { Network } from "game/Network"
 import { RemoteCars } from "game/RemoteCars"
@@ -67,6 +71,15 @@ async function main() {
   const remotes = new RemoteCars(world.scene, effects.smoke, { heightAt: (x, z) => chunks.heightAt(x, z), assets })
   const dayNight = new DayNight(world)
   const skyEnv  = new SkyEnv(world, dayNight)               // the sky baked into an environment map for the materials
+  const clouds  = new Clouds(world.scene)
+  // ?debug=1: a corner readout of what the renderer is doing, with any shader compile errors (paste it when it looks wrong)
+  const debugEl = el("debug"), shaderErrors = []
+  debugEl.hidden = !flag("debug")
+  world.renderer.debug.onShaderError = (gl, program, vs, fs) => {
+    const log = gl.getProgramInfoLog(program) + " | " + gl.getShaderInfoLog(vs) + " | " + gl.getShaderInfoLog(fs)
+    shaderErrors.push(log.slice(0, 300)); console.error("shader:", log)
+  }
+  let frames = 0, fps = 0, fpsT = performance.now()
   const shadow  = new Blob(world.scene)                      // the contact shadow under the player
   const loading = new LoadingScreen(el("laden"))
   const burnEl = el("burn")
@@ -200,6 +213,8 @@ async function main() {
     { const f = car.forward(); world.sunAnchor.set(Math.round((car.x + f.x * 50) / 4) * 4, Math.round(car.y / 4) * 4, Math.round((car.z + f.z * 50) / 4) * 4) }
     const darkness = dayNight.update()
     skyEnv.update(now)
+    clouds.update(dt, world.camera, dayNight.env)
+    TREE_UNIFORMS.uTime.value += dt
     car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)
     updateWater(dayNight.env, timer.getElapsed())
     if (input.toggleMap) minimap.toggle()
@@ -279,6 +294,16 @@ async function main() {
       clockEl.textContent = dayNight.clock()
       session.hud()
       if (loading.open) loading.progress(placed ? chunks.readyFraction(car.x, car.z) : 0)
+      if (!debugEl.hidden) {
+        const info = world.renderer.info, gl = world.renderer.getContext(), dbg = gl.getExtension("WEBGL_debug_renderer_info")
+        debugEl.textContent = [
+          `${fps} fps · ${info.render.calls} calls · ${(info.render.triangles / 1e6).toFixed(2)} M tris · ${info.memory.textures} textures · ${info.programs?.length ?? "?"} programs`,
+          `gpu ${dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "?"} · shadows ${world.shadows ? "on" : "off"} · ${navigator.userAgent.split(") ").pop()}`,
+          `textures ok ${textureStats.ok} failed ${textureStats.failed} ${textureStats.last}`,
+          `ortho ${chunks.ortho.enabled ? `ready ${chunks.ortho.stats.ready} loads ${chunks.ortho.stats.loads} failed ${chunks.ortho.stats.failed}` : "off"} · tiles ${chunks.tiles.size}`,
+          ...(shaderErrors.length ? [`SHADER ERRORS (${shaderErrors.length}): ${shaderErrors[shaderErrors.length - 1]}`] : []),
+        ].join("\n")
+      }
       // the dragon in your sights (or the nearest awake one): name and hp
       const aimed = dragons.aimed(car)
       doelwitEl.hidden = !aimed
@@ -305,6 +330,7 @@ async function main() {
     playersEl.textContent = remotes.count ? `${remotes.count} andere ${remotes.count === 1 ? "chauffeur" : "chauffeurs"} online` : ""
 
     world.render()
+    if (++frames >= 30) { const t = performance.now(); fps = Math.round(frames * 1000 / (t - fpsT)); frames = 0; fpsT = t }
     requestAnimationFrame(frame)
   }
   frame(performance.now())

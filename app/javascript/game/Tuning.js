@@ -90,9 +90,10 @@ export const TUNING = {
     aimCone: 0.44, aimRange: 300,    // auto-aim: a dragon within this angle and range is the target
   },
   look: {
-    exposure: 1.0,         // tone mapping exposure by day (the night adds up to +35 %)
+    exposure: 1.05,        // tone mapping exposure by day (the night adds up to +35 %)
+    sun: 2.4,              // the sun's intensity at noon: strong, so lit and shadowed sides differ
     envIntensity: 0.35,    // how much the sky environment map lights standard materials
-    hemi: 0.65,            // hemisphere light scale once the environment map supplies ambient (1 without it)
+    hemi: 0.5,             // hemisphere light scale once the environment map supplies ambient (1 without it)
     orthoSat: 1.1, orthoGain: 0.9,   // saturation and gain of the aerial photo on the terrain
     detail: 0.9, detailFar: 260,     // the close-range ground grain: strength, and the distance it has faded out by
     windows: { lit: 0.35, glow: 1.4 }, // share of windows lit at night, and how bright

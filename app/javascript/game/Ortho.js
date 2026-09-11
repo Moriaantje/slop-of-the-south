@@ -49,7 +49,7 @@ export class Ortho {
     if (a) {
       const e = this.entries.get(a.key)
       if (e && a.size > e.have) { e.have = a.size; e.tile.terrain.setMap(bitmapTexture(a.bitmap)); this.stats.ready++ }
-      else a.bitmap.close?.()
+      else if (a.bitmap.src?.startsWith("blob:")) URL.revokeObjectURL(a.bitmap.src)
     }
     if (this.inflight >= this.maxInflight) return
     const cands = []
@@ -79,7 +79,7 @@ export class Ortho {
   dispose() {
     for (const e of this.entries.values()) e.ctrl?.abort()
     this.entries.clear()
-    for (const a of this.arrived) a.bitmap.close?.()
+    for (const a of this.arrived) if (a.bitmap.src?.startsWith("blob:")) URL.revokeObjectURL(a.bitmap.src)
     this.arrived.length = 0
   }
 }

@@ -1,28 +1,60 @@
 import * as THREE from "three"
 import { pointKey, hideInstance, showInstance } from "game/Destructibles"
 
-// Procedural low-poly trees: trunk, recursive branches and leaf clusters at the tips. A handful of variants per
-// kind is generated once from fixed seeds; every tree picks its variant, rotation, width and tint from a hash of
-// its position, so the same tree always stands in the same place looking the same. Tiles draw one InstancedMesh
-// per variant. Tile entries: [x, z, kind, height] with kind 0 street/park tree, 1 broadleaf wood, 2 conifer. With
-// `reg` every tree registers a destructible handle keyed by its position; a felled tree is a zero-scale instance.
-// front faces only: leaf clusters and trunks are closed shapes, and the 8k trees around the player are the biggest
-// triangle budget in the scene, so drawing their back faces too would double it
-const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 })
-material.__shared = true
-
-const VARIANTS = { 0: 6, 1: 4, 2: 3, 3: 3 }
-const BARK = { 0: 0x5b4634, 1: 0x4e3d30, 2: 0x4a3226, 3: 0x5a4331 }
+// Trees as painted billboards: each tree is a cross of two quads carrying a canopy painted once on a canvas (a few
+// hundred soft leaf clusters and a trunk, per kind and variant), alpha-tested so the shadow map sees the leaf shape,
+// with normals bent into a sphere so the crown is lit round, and a slow sway in the vertex shader. Eight thousand
+// of these are four triangles each — a tenth of the old low-poly geometry — and read as foliage from every distance.
+// Tile entries: [x, z, kind, height] with kind 0 street/park tree, 1 broadleaf wood, 2 conifer, 3 hoogstam fruit.
+// With `reg` every tree registers a destructible handle keyed by its position; a felled tree is a zero-scale instance.
+const VARIANTS = { 0: 3, 1: 3, 2: 2, 3: 2 }
 const LEAVES = {
-  0: [0x5d8f45, 0x6a9a4a, 0x7fa64f, 0x8fa943, 0x578a3e],
-  1: [0x3f6f33, 0x477a3b, 0x4f8541, 0x386428],
-  2: [0x2f5a35, 0x2a5030, 0x34633a],
-  3: [0x6c9a46, 0x76a24c, 0x81a952]                              // hoogstam fruit trees
+  0: ["#3f7a32", "#4f8c3a", "#63a046", "#7fb04e", "#9cc25a"],
+  1: ["#2d5c27", "#3a6f2e", "#477f36", "#568e3f", "#6d9e48"],
+  2: ["#1f4527", "#28522e", "#2f5f36", "#3a6b40"],
+  3: ["#4f8a3a", "#63a04a", "#78b256", "#93c264", "#b7d27a"],
 }
-const ICO = new THREE.IcosahedronGeometry(1, 0).attributes.position   // 20-face leaf cluster template
+export const TREE_UNIFORMS = { uTime: { value: 0 } }
 
-const geometries = {}
-for (const kind of [0, 1, 2, 3]) geometries[kind] = Array.from({ length: VARIANTS[kind] }, (_, i) => buildVariant(kind, 1000 * (kind + 1) + 7 * i))
+// the cross: two unit quads (1 wide, 1 tall from y = 0) at right angles
+const geometry = (() => {
+  const pos = [], uv = [], idx = []
+  for (const [ax, az] of [[1, 0], [0, 1]]) {
+    const b = pos.length / 3
+    for (const [sx, y] of [[-0.5, 0], [0.5, 0], [0.5, 1], [-0.5, 1]]) { pos.push(sx * ax, y, sx * az); uv.push(sx + 0.5, y) }
+    idx.push(b, b + 1, b + 2, b, b + 2, b + 3)
+  }
+  const g = new THREE.BufferGeometry()
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2))
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(new Array(pos.length).fill(0), 3))
+  g.setIndex(idx)
+  g.__shared = true
+  return g
+})()
+
+const materials = {}
+function material(kind, variant) {
+  const key = `${kind}:${variant}`
+  if (materials[key]) return materials[key]
+  const map = new THREE.CanvasTexture(paintTree(kind, 1000 * (kind + 1) + 7 * variant))
+  map.colorSpace = THREE.SRGBColorSpace
+  map.anisotropy = 4
+  const m = new THREE.MeshStandardMaterial({ map, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.9, metalness: 0 })
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = TREE_UNIFORMS.uTime
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nuniform float uTime;")
+      // the crown is lit as a sphere around (0, 0.65, 0), the trunk below stays upright
+      .replace("#include <beginnormal_vertex>", "vec3 objectNormal = normalize(vec3(position.x * 2.2, (position.y - 0.62) * 1.4 + 0.45, position.z * 2.2));")
+      // sway: the top of the tree leans with a slow wind, each instance out of phase
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\n\tfloat sway = sin(uTime * 1.1 + float(gl_InstanceID) * 0.73) * 0.025 * transformed.y * transformed.y;\n\ttransformed.x += sway; transformed.z += sway * 0.6;")
+  }
+  m.customProgramCacheKey = () => "tree-billboard"
+  m.__shared = true
+  materials[key] = m
+  return m
+}
 
 export function buildTrees(trees, heightAt, reg) {
   if (!trees?.length) return null
@@ -31,19 +63,19 @@ export function buildTrees(trees, heightAt, reg) {
     const kind = t[2] ?? 1
     const variant = Math.floor(rand(t[0], t[1]) * VARIANTS[kind])
     const key = kind * 10 + variant
-    if (!groups.has(key)) groups.set(key, { geo: geometries[kind][variant], list: [], kind })
+    if (!groups.has(key)) groups.set(key, { mat: material(kind, variant), list: [], kind })
     groups.get(key).list.push(t)
   }
   const group = new THREE.Group()
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0)
   const color = new THREE.Color()
-  for (const { geo, list, kind } of groups.values()) {
-    const mesh = new THREE.InstancedMesh(geo, material, list.length)
+  for (const { mat, list, kind } of groups.values()) {
+    const mesh = new THREE.InstancedMesh(geometry, mat, list.length)
     list.forEach(([x, z, , h], i) => {
-      const spin = rand(z, x), width = (kind === 3 ? 1.35 : 1) * (0.85 + 0.3 * rand(x + 1, z)), tint = 0.85 + 0.3 * rand(x, z + 1)
+      const spin = rand(z, x), width = (kind === 3 ? 1.3 : kind === 2 ? 0.7 : 1) * (0.85 + 0.3 * rand(x + 1, z)), tint = 0.85 + 0.3 * rand(x, z + 1)
       q.setFromAxisAngle(up, spin * Math.PI * 2)
-      s.set(h * width, h, h * width)                           // geometry is 1 unit tall
-      mesh.setMatrixAt(i, m.compose(p.set(x, heightAt(x, z) - 0.15, z), q, s))
+      s.set(h * width, h, h * width)                           // the painting is 1 unit tall
+      mesh.setMatrixAt(i, m.compose(p.set(x, heightAt(x, z) - 0.1, z), q, s))
       mesh.setColorAt(i, color.setRGB(tint, tint * (0.97 + 0.06 * rand(x, z + 2)), tint * 0.95))
       reg?.(pointKey("t", x, z), { kind: "t", x, z, r: THREE.MathUtils.clamp(0.08 * h, 0.3, 1), h, max: 30, remove: () => hideInstance(mesh, i), restore: () => showInstance(mesh, i) })
     })
@@ -55,103 +87,55 @@ export function buildTrees(trees, heightAt, reg) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// variant generation (deterministic per seed); geometry is scaled so the tree is exactly 1 unit tall
+// the painting: a 256 × 512 canvas, trunk at the bottom, the crown a cloud of soft leaf discs shaded from the top left
 
-function buildVariant(kind, seed) {
+function paintTree(kind, seed) {
   const rnd = mulberry32(seed)
-  const out = { pos: [], col: [] }
-  const bark = new THREE.Color(BARK[kind])
-  const leaf = new THREE.Color(LEAVES[kind][Math.floor(rnd() * LEAVES[kind].length)])
-  if (kind === 2) conifer(out, rnd, bark, leaf)
-  else if (kind === 3) branch(out, rnd, new THREE.Vector3(), new THREE.Vector3(0, 1, 0), 0.42, 0.05, 0, 2, 0.2, bark, leaf)   // short trunk, broad crown
-  // two levels of branching for every kind: three levels made a street tree ~750 triangles (≈6 M for the trees in view)
-  else branch(out, rnd, new THREE.Vector3(), new THREE.Vector3(0, 1, 0), kind === 0 ? 0.36 : 0.3, 0.035, 0, 2, kind === 0 ? 0.16 : 0.17, bark, leaf)
-
-  let maxY = 0
-  for (let i = 1; i < out.pos.length; i += 3) maxY = Math.max(maxY, out.pos[i])
-  const k = 1 / maxY
-  for (let i = 0; i < out.pos.length; i++) out.pos[i] *= k
-
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(out.pos, 3))
-  geo.setAttribute("color", new THREE.Float32BufferAttribute(out.col, 3))
-  geo.computeVertexNormals()           // non-indexed → flat shading
-  geo.__shared = true                  // reused by every tile: never dispose with a tile
-  return geo
-}
-
-// broadleaf: tapered branch, then 2–3 children tilted outward; leaf clusters on the tips and inside the crown
-function branch(out, rnd, origin, dir, len, radius, depth, maxDepth, leafSize, bark, leaf) {
-  const end = origin.clone().addScaledVector(dir, len)
-  cylinder(out, origin, end, radius, radius * (depth === maxDepth ? 0.35 : 0.65), 5, bark)
-  if (depth === maxDepth) { cluster(out, rnd, end, leafSize * (0.8 + rnd() * 0.5), leaf); return }
-  const n = 2 + (rnd() < 0.6 ? 1 : 0)
-  const az0 = rnd() * Math.PI * 2
+  const W = 256, H = 512, c = document.createElement("canvas"); c.width = W; c.height = H
+  const ctx = c.getContext("2d")
+  ctx.clearRect(0, 0, W, H)
+  const leaves = LEAVES[kind]
+  const trunkH = kind === 2 ? 0.16 : kind === 3 ? 0.28 : 0.3                    // share of the height that is bare trunk
+  // trunk and a couple of branches
+  const bark = ctx.createLinearGradient(0, 0, W, 0); bark.addColorStop(0, "#3a2a1c"); bark.addColorStop(0.5, "#6a4e36"); bark.addColorStop(1, "#33241a")
+  ctx.fillStyle = bark
+  const tw = kind === 2 ? 0.045 : 0.075
+  ctx.beginPath(); ctx.moveTo(W * (0.5 - tw), H); ctx.lineTo(W * (0.5 + tw), H); ctx.lineTo(W * (0.5 + tw * 0.5), H * (1 - trunkH - 0.15)); ctx.lineTo(W * (0.5 - tw * 0.5), H * (1 - trunkH - 0.15)); ctx.fill()
+  if (kind !== 2) for (let i = 0; i < 3; i++) {
+    const y0 = H * (1 - trunkH - 0.02 - rnd() * 0.1), dir = rnd() < 0.5 ? -1 : 1
+    ctx.lineWidth = W * 0.02; ctx.strokeStyle = "#4a3626"; ctx.beginPath(); ctx.moveTo(W / 2, y0); ctx.quadraticCurveTo(W * (0.5 + dir * 0.15), y0 - H * 0.08, W * (0.5 + dir * 0.28), y0 - H * 0.2); ctx.stroke()
+  }
+  if (kind === 2) {
+    // conifer: stacked jagged tiers, darker below
+    const tiers = 6
+    for (let t = 0; t < tiers; t++) {
+      const yBase = H * (0.98 - trunkH * 0.5 - t * (1 - trunkH) / tiers * 0.95), yTop = yBase - H * (1 - trunkH) / tiers * 1.6
+      const r = W * 0.46 * (1 - t / (tiers + 1))
+      const g = ctx.createLinearGradient(W / 2 - r, 0, W / 2 + r, 0)
+      g.addColorStop(0, leaves[0]); g.addColorStop(0.45, leaves[Math.min(3, 1 + t % 3)]); g.addColorStop(1, leaves[1])
+      ctx.fillStyle = g
+      ctx.beginPath(); ctx.moveTo(W / 2, yTop)
+      for (let k = 0; k <= 8; k++) { const f = k / 8, x = W / 2 + r * (f * 2 - 1), jag = (k % 2 ? -1 : 1) * H * 0.012 + (rnd() - 0.5) * H * 0.01; ctx.lineTo(x, yBase + jag - Math.abs(f * 2 - 1) * H * 0.01) }
+      ctx.closePath(); ctx.fill()
+    }
+    return c
+  }
+  // broadleaf: many soft discs, denser and darker towards the bottom, a light from the top left
+  const cx = W / 2, cy = H * (1 - trunkH) * 0.5, rx = W * 0.47, ry = H * (1 - trunkH) * 0.48
+  const n = kind === 3 ? 240 : 320
   for (let i = 0; i < n; i++) {
-    const d = tilted(dir, az0 + i * 2 * Math.PI / n + (rnd() - 0.5) * 0.8, 0.45 + rnd() * 0.45)
-    branch(out, rnd, end, d, len * (0.62 + rnd() * 0.15), radius * 0.62, depth + 1, maxDepth, leafSize, bark, leaf)
+    const a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * 0.92
+    const x = cx + Math.cos(a) * rx * d, y = cy + Math.sin(a) * ry * d * (kind === 3 ? 0.9 : 1)
+    const light = 0.5 + 0.5 * (((cx - x) / rx) * 0.4 + ((cy - y) / ry) * 0.6)           // top-left brighter
+    const shade = Math.max(0, Math.min(1, light * 0.7 + rnd() * 0.5 - (d * 0.3)))
+    ctx.fillStyle = leaves[Math.min(leaves.length - 1, Math.floor(shade * leaves.length))]
+    const r = W * (0.035 + rnd() * 0.05)
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r)
+    g.addColorStop(0, ctx.fillStyle); g.addColorStop(0.7, ctx.fillStyle); g.addColorStop(1, "rgba(0,0,0,0)")
+    ctx.fillStyle = g
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill()
   }
-  if (depth >= 1) cluster(out, rnd, end, leafSize * 0.75, leaf)
-}
-
-// conifer: full-height trunk with 4–5 stacked, slightly irregular cones
-function conifer(out, rnd, bark, leaf) {
-  cylinder(out, new THREE.Vector3(), new THREE.Vector3(0, 0.95, 0), 0.03, 0.006, 5, bark)
-  const tiers = 4 + Math.floor(rnd() * 2)
-  for (let t = 0; t < tiers; t++) {
-    const y = 0.16 + t * 0.78 / tiers
-    const r = 0.24 * (1 - t / (tiers + 0.6)) * (0.9 + rnd() * 0.2)
-    cone(out, new THREE.Vector3((rnd() - 0.5) * 0.03, y, (rnd() - 0.5) * 0.03), r, 0.3 - t * 0.02, 7, leaf.clone().multiplyScalar(0.92 + rnd() * 0.16))
-  }
-}
-
-function tilted(dir, azimuth, tilt) {
-  const u = new THREE.Vector3(1, 0, 0)
-  if (Math.abs(dir.x) > 0.9) u.set(0, 0, 1)
-  u.cross(dir).normalize()
-  const v = new THREE.Vector3().crossVectors(dir, u)
-  return new THREE.Vector3().addScaledVector(dir, Math.cos(tilt))
-    .addScaledVector(u, Math.cos(azimuth) * Math.sin(tilt)).addScaledVector(v, Math.sin(azimuth) * Math.sin(tilt))
-    .add(new THREE.Vector3(0, 0.12, 0)).normalize()                 // branches reach upward a little
-}
-
-function cylinder(out, a, b, ra, rb, segs, color) {
-  const axis = b.clone().sub(a).normalize()
-  const u = new THREE.Vector3(1, 0, 0)
-  if (Math.abs(axis.x) > 0.9) u.set(0, 0, 1)
-  u.cross(axis).normalize()
-  const v = new THREE.Vector3().crossVectors(axis, u)
-  const ring = (c, r, i) => { const t = i / segs * Math.PI * 2; return c.clone().addScaledVector(u, Math.cos(t) * r).addScaledVector(v, Math.sin(t) * r) }
-  for (let i = 0; i < segs; i++) {
-    const a0 = ring(a, ra, i), a1 = ring(a, ra, i + 1), b0 = ring(b, rb, i), b1 = ring(b, rb, i + 1)
-    tri(out, a0, b0, b1, color); tri(out, a0, b1, a1, color)
-  }
-}
-
-function cone(out, base, r, h, segs, color) {
-  const apex = base.clone(); apex.y += h
-  for (let i = 0; i < segs; i++) {
-    const t0 = i / segs * Math.PI * 2, t1 = (i + 1) / segs * Math.PI * 2
-    const p0 = new THREE.Vector3(base.x + Math.cos(t0) * r, base.y, base.z + Math.sin(t0) * r)
-    const p1 = new THREE.Vector3(base.x + Math.cos(t1) * r, base.y, base.z + Math.sin(t1) * r)
-    tri(out, p0, p1, apex, color); tri(out, p0, apex, p1, color.clone().multiplyScalar(0.8))   // underside darker
-  }
-}
-
-// leaf cluster: a randomly rotated, slightly squashed icosahedron
-function cluster(out, rnd, center, size, color) {
-  const rot = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rnd() * 3, rnd() * 3, rnd() * 3))
-  const c = color.clone().multiplyScalar(0.9 + rnd() * 0.2)
-  const p = new THREE.Vector3()
-  for (let i = 0; i < ICO.count; i++) {
-    p.fromBufferAttribute(ICO, i).multiply(new THREE.Vector3(size, size * 0.8, size)).applyMatrix4(rot).add(center)
-    out.pos.push(p.x, p.y, p.z); out.col.push(c.r, c.g, c.b)
-  }
-}
-
-function tri(out, a, b, c, color) {
-  out.pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z)
-  out.col.push(color.r, color.g, color.b, color.r, color.g, color.b, color.r, color.g, color.b)
+  return c
 }
 
 function mulberry32(seed) {
