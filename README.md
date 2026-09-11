@@ -77,6 +77,21 @@ in the game's about screen.
 
 Tiles are static JSON served by nginx/Rails' static file server — no DB hit while playing.
 
+### 1.4 a Roads in the terrain
+
+The height on the wire (`roads[].pts[i][2]`, `junctions[][2]`) **is the road surface level**. `RoadBuilder` samples the
+terrain along each way, smooths it (60 m box filter twice for motorways/trunks/primaries, 30 m once for the rest), pins
+it at junction nodes so meeting roads share a height, and clamps it to at most `CUT_LIMIT` 0.25 m below and
+`FILL_LIMIT` (6 m major, 1.5 m minor, 0.4 m cycleway/track) above the terrain; bridges float. The tile's height grid is
+then deformed: within `max(width/2 + 0.5, 5)` m of the centreline the terrain *is* the road level (the bed), the next
+`VERGE` 2.5 m sit a `CURB` 0.12 m higher (the sidewalk strip), and over `SHOULDER` 6 m more it blends back to nature.
+Junction patches get the same seat. On the client `Roads.js` draws the carriageway `ROAD_LIFT` 0.05 m above the higher
+of the road level and the terrain under each vertex (the 10 m grid smears the curb across the ribbon edge, so ribbons
+follow the terrain where it pokes up), the procedural sidewalks `CURB` above that, and `ChunkManager.heightAt` gives
+the car the same surface, blended into the terrain over ±0.3 m at the ribbon edge so the wheels roll over the curb.
+Order from low to high: road < painted pavement / verge < sidewalk ribbon. `test/services/road_builder_test.rb` pins
+the numbers down; rebuild tiles (`tiles:clean tiles:build`) after touching any of it.
+
 ### 1.4 b Water
 
 The AHN height inside water is the water *surface*, so the tile builder carves a bed under lakes, harbours, rivers,
@@ -133,10 +148,16 @@ comes from `localStorage.driverName`, settable with `?name=Pietje`.
     game/FlameWall.js        animated fire curtain along the province border; even-odd inside test for the burn-back
     game/Minimap.js          map drawn from our own data (MapBuilder → public/map): overview + 1 km detail cells;
                              M expands, drag pans, wheel zooms, F fits the bounds, click teleports
-    game/Vehicle.js          arcade bicycle-model car physics
+    game/Vehicle.js          arcade car: body-frame velocity (speed + lateral), grip model, handbrake drift with
+                             mini-turbo charge, nitro meter (Shift, drift payout, road pads), shared car mesh
+    game/Suspension.js       four wheels on their own ground, spring-damped body heave/pitch/roll, wheel spin + steer
+    game/Camera.js           spring-damped chase camera: sits behind a blend of nose and velocity, speed/boost FOV
+    game/VehicleFx.js        pooled tyre smoke while sliding, exhaust flames while boosting (local and remote cars)
+    game/Pickups.js          boost pads placed deterministically per tile from its roads; ring + beam, local respawn
+    game/Tuning.js           every feel constant in one object (window.slop.tuning), smoothing helpers, seeded RNG
     game/Input.js            keyboard
     game/Network.js          Action Cable
-    game/RemoteCars.js       interpolation of other players
+    game/RemoteCars.js       interpolation of other players, their wheels, smoke and flames
 
 ### 1.7 Milestones
 
@@ -217,6 +238,23 @@ Open http://localhost:3000 in two browser windows and drive.
   on disk, so an empty database yields a flat 40 m NAP world and a 404 per tile in the dev log on first load.
 - With LoD2.2 buildings a dense town tile is about 1 MB of JSON (roughly 100 MB for phase 1). Fine locally; serve
   `public/tiles` gzipped (or move to a binary tile format) before putting it on the internet.
-Controls: W/↑ accelerate, S/↓ brake/reverse, A/D or ←/→ steer, Space handbrake, R reset to road, M expand the minimap
-(drag to pan, scroll to zoom, F fits the whole area, click to teleport, Esc closes). `?spawn=x,z,yaw` in the URL
-spawns at game coordinates.
+Controls: W/↑ accelerate, S/↓ brake/reverse, A/D or ←/→ steer, Space handbrake, Shift boost, R reset to road, M expand
+the minimap (drag to pan, scroll to zoom, F fits the whole area, click to teleport, Esc closes). `?spawn=x,z,yaw` in
+the URL spawns at game coordinates.
+
+### Driving
+
+- **Drift**: Space while steering above ~30 km/h kicks the rear out (`grip` drops to 0.22); steer into the slide to
+  widen it, counter-steer to trim it; let go of Space to hook up again in about 0.4 s. Sharp steering above 80 km/h
+  slides mildly on its own. The HUD shows `DRIFT` with three pips filling at 0.7 / 1.5 / 2.5 s of slide; releasing
+  pays out a mini-turbo (0.5 / 0.9 / 1.4 s of free boost plus 12 % meter per pip). A wall ends a drift without payout.
+- **Boost**: Shift burns the orange meter (3 s from full, trickles back in 25 s); top speed rises 28 %, acceleration
+  90 %, the camera pulls back and widens, flames come out of the exhaust. Blue rings with a light beam on straight
+  stretches of through and residential roads (every 300–500 m, never on junctions or bridges) fill 35 % of the meter
+  and give a short kick; they come back after 20 s (locally).
+- **Suspension**: the body floats on springs over four wheels that each rest on their own ground: it dives when braking,
+  lifts when launching, leans outward in corners and drifts, and bobs over curbs and bridge ramps.
+- **Camera**: critically damped springs for position, aim and yaw; at speed it sits behind the velocity rather than the
+  nose so a drift is visible; distance, height and field of view grow with speed and boost; it never sinks below the
+  ground.
+- Everything is tunable live: `slop.tuning.drift.gripDrift = 0.3` etc. in the console (`game/Tuning.js`).

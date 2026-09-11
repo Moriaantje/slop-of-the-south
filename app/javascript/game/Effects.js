@@ -1,7 +1,8 @@
 import * as THREE from "three"
+import { TUNING as T } from "game/Tuning"
 
-// Short-lived visuals: explosion flashes, flying debris, dust clouds and a camera shake. Everything here is
-// cosmetic and local; the world state comes from the server.
+// Short-lived visuals: explosion flashes, flying debris, dust clouds and a camera shake, plus a fixed pool of sprites
+// for continuous emitters (tyre smoke). Everything here is cosmetic and local; the world state comes from the server.
 const MAX_LIVE = 40
 const flashGeo = new THREE.SphereGeometry(1, 12, 8)
 const debrisGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5)
@@ -13,6 +14,7 @@ export class Effects {
     this.scene = scene
     this.live = []
     this.shakeAmt = 0
+    this.smoke = new SpritePool(scene, T.fx.smokePool, 0xd8d8d8)
   }
 
   // a flash growing to r, debris flying out of it, dust spreading on the ground
@@ -71,6 +73,7 @@ export class Effects {
 
   // once per frame, after the camera has moved
   update(dt, camera) {
+    this.smoke.update(dt)
     for (let i = this.live.length - 1; i >= 0; i--) {
       const e = this.live[i]
       e.t += dt
@@ -84,6 +87,44 @@ export class Effects {
     }
   }
 }
+
+// A fixed number of sprites that are reused round-robin: no allocation per puff, and no pressure on MAX_LIVE.
+// Each sprite owns its material once (opacity is per material). emit() takes the oldest slot.
+export class SpritePool {
+  constructor(scene, n, color) {
+    this.items = []
+    this.next = 0
+    for (let i = 0; i < n; i++) {
+      const mat = new THREE.SpriteMaterial({ map: dustTexture(), transparent: true, opacity: 0, depthWrite: false, color })
+      const sprite = new THREE.Sprite(mat)
+      sprite.visible = false
+      scene.add(sprite)
+      this.items.push({ sprite, mat, life: 0, t: 0, vx: 0, vy: 0, vz: 0, s0: 1, s1: 1, a0: 1 })
+    }
+  }
+
+  emit(x, y, z, vx, vy, vz, life, s0, s1, a0) {
+    const e = this.items[this.next]; this.next = (this.next + 1) % this.items.length
+    e.sprite.position.set(x, y, z); e.sprite.visible = true
+    e.vx = vx; e.vy = vy; e.vz = vz; e.life = life; e.t = 0; e.s0 = s0; e.s1 = s1; e.a0 = a0
+    e.sprite.scale.setScalar(s0); e.mat.opacity = a0
+  }
+
+  update(dt) {
+    for (const e of this.items) {
+      if (!e.sprite.visible) continue
+      e.t += dt
+      if (e.t >= e.life) { e.sprite.visible = false; continue }
+      const k = e.t / e.life
+      e.sprite.position.x += e.vx * dt; e.sprite.position.y += e.vy * dt; e.sprite.position.z += e.vz * dt
+      e.sprite.scale.setScalar(e.s0 + (e.s1 - e.s0) * k)
+      e.mat.opacity = e.a0 * (1 - k)
+    }
+  }
+}
+
+// soft radial blob, shared by dust, smoke and flames
+export function softTexture() { return dustTexture() }
 
 function dustTexture() {
   if (dustTex) return dustTex
