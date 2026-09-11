@@ -17,7 +17,9 @@ module Api
         border: Boundary.rings_for_client,
         # changes whenever tiles:build rewrites public/tiles, so browsers drop their cached tile files (the static
         # file server sends a two-day max-age)
-        tiles_version: (dir = Rails.root.join("public", "tiles")).exist? ? File.mtime(dir).to_i : 0
+        tiles_version: (dir = Rails.root.join("public", "tiles")).exist? ? File.mtime(dir).to_i : 0,
+        # server clock in milliseconds; the client offsets Date.now() by it so every player sees the same round
+        now: Game.now_ms
       }
     end
   end

@@ -1,0 +1,59 @@
+require "test_helper"
+
+module Game
+  class RoundTest < ActiveSupport::TestCase
+    START = 1_700_000_000_000
+
+    def round(obstacles = [ obstacle("m:1", 300), obstacle("t:1,1", 120), obstacle("m:2", 900) ])
+      Round.new(id: 1, arena: { cx: 0.0, cz: 0.0, half: 1250.0 }, path: { x0: -1250.0, z0: 0.0, x1: 1250.0, z1: 0.0, length: 2500.0 },
+                spawn: { x: 0.0, z: 0.0, yaw: 0.0 }, obstacles:)
+    end
+
+    def obstacle(key, at) = { key:, kind: key[0], x: 0.0, z: 0.0, at: at.to_f }
+
+    test "sorts obstacles along the path and blocks on the first one standing" do
+      r = round
+      assert_equal [ 120, 300, 900 ], r.obstacles.map(&:at)
+      r.hit("t:1,1", 1, 1)
+      assert_equal "m:1", r.blocker.key
+    end
+
+    test "loses when the carrier reaches a standing obstacle and wins once the path is clear" do
+      r = round
+      r.start!(START, [])
+      before = START + (120 / r.speed * 1000).floor - 1
+      assert_nil r.check(before)
+      assert_equal :lost, r.check(before + 2)
+      assert_in_delta(-1250 + 120, r.carrier_at(before + 2)[0], 0.01)
+      r.obstacles.each { |o| 2.times { r.hit(o.key, 10_000, 100) } }
+      assert_nil r.check(START + Round::CROSSING_MS - 1)
+      assert_equal :won, r.check(START + Round::CROSSING_MS)
+    end
+
+    test "buildings crumble to rubble and then vanish, other things vanish at once" do
+      r = round
+      assert_equal :intact, r.hit("m:1", 60, 100).state
+      rubble = r.hit("m:1", 60, 999)                                  # the second max is ignored
+      assert_equal [ :rubble, 50, 100 ], [ rubble.state, rubble.hp, rubble.max ]
+      assert_equal :rubble, r.hit("m:1", 49, 100).state
+      assert_equal :gone, r.hit("m:1", 1, 100).state
+      assert_nil r.hit("m:1", 1, 100)
+      assert_equal :gone, r.hit("t:5,5", 30, 30).state
+      assert_nil r.hit("l:5,5", -3, 30)
+      assert_equal [ "t:5,5" ], r.to_h([]).dig(:objects).map { _1[:key] }
+    end
+
+    test "the shared action waits a minute and is free again when a round starts" do
+      r = round
+      p = Round::Player.new(id: "p", name: "Piet", joined_at: 0, tabs: 1)
+      assert r.action_allowed?(p, START)
+      p.last_action_at = START
+      assert_not r.action_allowed?(p, START + 59_999)
+      assert_equal START + 60_000, r.next_action_at(p)
+      assert r.action_allowed?(p, START + 60_000)
+      p.last_action_at = START + 60_000
+      r.start!(START + 70_000, [ p ])
+      assert r.action_allowed?(p, START + 70_000)
+    end
+  end
+end
