@@ -1,11 +1,12 @@
 module Game
   # Picks a round's arena and asks PostGIS everything about it: a random settlement inside the border, a straight
-  # carrier path through it, the objects standing in the carrier's corridor with the distance at which its nose
-  # reaches them, and a road near the start to drop the players on. Everything comes back in game units.
+  # parade route through it, the objects standing in the float's corridor with the distance at which its nose
+  # reaches them, and a road near the start to drop the players on. Everything comes back in game units, with what
+  # Wikipedia knows about the town for the loading screen.
   class Arena
     HALF      = 1250.0                             # arena half-size in metres
-    CORRIDOR  = 3.0                                # half-width of the swept path: half the carrier plus a metre of margin
-    NOSE      = Round::CARRIER[:length] / 2.0
+    CORRIDOR  = 3.0                                # half-width of the swept route: half the float plus a metre of margin
+    NOSE      = Round::FLOAT[:length] / 2.0
     KINDS     = %w[city town village].freeze
     OBSTACLES = 15..250                            # retry the pick when a corridor is empty or hopeless
     FIRST_AT  = 120.0                              # ...or when the first obstacle gives the players no time
@@ -18,7 +19,7 @@ module Game
           place = pick_place or break
           path = path_for(place[:cx], place[:cz], rand * Math::PI)
           obstacles = obstacles(path)
-          best = { arena: place.merge(half: HALF), path:, obstacles:, spawn: spawn_near(path) }
+          best = { arena: place.merge(half: HALF, info: TownInfo.fetch(place[:name], place[:kind])), path:, obstacles:, spawn: spawn_near(path) }
           return best if OBSTACLES.cover?(obstacles.size) && obstacles.first[:at] >= FIRST_AT
         end
         best
@@ -39,7 +40,7 @@ module Game
       { name:, kind:, cx: cx.round(1), cz: cz.round(1) }
     end
 
-    # a straight line through the centre at `heading` (compass radians), ending on the arena square
+    # a straight route through the centre at `heading` (compass radians), ending on the arena square
     def path_for(cx, cz, heading, half = HALF)
       dx, dz = Math.sin(heading), -Math.cos(heading)
       r = half / [ dx.abs, dz.abs ].max

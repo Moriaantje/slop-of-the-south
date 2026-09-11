@@ -1,13 +1,13 @@
 module Game
-  # One round: the arena, the carrier's motion along the path, every object hit so far and each player's action
-  # cooldown. Time is server milliseconds. The carrier's position is a pure function of started_at and speed, so
-  # clients render it from a clock offset without any messages.
+  # One round: the arena, the parade float's motion along the route, every object hit so far and each player's
+  # action cooldown. Time is server milliseconds. The float's position is a pure function of started_at and speed,
+  # so clients render it from a clock offset without any messages.
   class Round
-    CROSSING_MS    = 900_000                      # the carrier takes 15 minutes edge to edge
+    CROSSING_MS    = 900_000                      # the float takes 15 minutes edge to edge
     RUBBLE_SHARE   = 0.5                          # a flattened building leaves rubble worth this share of its hit points
     ACTION_MS      = 60_000                       # teleport or vehicle switch, then this long a cooldown
     MAX_HP         = 100_000
-    CARRIER        = { length: 12, width: 4 }.freeze
+    FLOAT          = { length: 12, width: 4 }.freeze
     BUILDING_KINDS = %w[m b].freeze
 
     Obj    = Struct.new(:key, :kind, :x, :z, :at, :hp, :max, :state, keyword_init: true)   # at: nil for objects off the path
@@ -38,14 +38,14 @@ module Game
     def ends_at = started_at && started_at + CROSSING_MS
     def travelled(now) = ((now - started_at) / 1000.0 * speed).clamp(0.0, length)
 
-    def carrier_at(now)
+    def float_at(now)
       t = travelled(now) / length
       [ path[:x0] + (path[:x1] - path[:x0]) * t, path[:z0] + (path[:z1] - path[:z0]) * t ]
     end
 
     def blocker = obstacles.find { _1.state != :gone }
 
-    # :lost when the carrier's nose reaches something still standing, :won when it reaches the far edge
+    # :lost when the float's nose reaches something still standing, :won when it reaches the far edge
     def check(now)
       d = travelled(now)
       if (b = blocker) && d >= b.at then :lost
@@ -79,7 +79,7 @@ module Game
     end
 
     def to_h(players)
-      { id:, status:, result:, arena:, path:, speed: speed.round(4), carrier: CARRIER,
+      { id:, status:, result:, arena:, path:, speed: speed.round(4), float: FLOAT,
         started_at:, ends_at:, next_at:, spawn:,
         obstacles: obstacles.map { obj_h(_1).merge(kind: _1.kind, x: _1.x, z: _1.z, at: _1.at) },
         objects: objects.values.reject(&:at).map { obj_h(_1) },

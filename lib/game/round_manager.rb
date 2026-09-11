@@ -129,6 +129,7 @@ module Game
 
     def start_intermission(now)
       prepared = @arena.prepare or return
+      @players.each_value { _1.last_action_at = nil }         # a fresh arena, fresh actions
       @seq += 1
       @round = Round.new(id: @seq, next_at: now + INTERMISSION_MS, **prepared)
       round_msg
@@ -140,7 +141,7 @@ module Game
     end
 
     def finish(now, result)
-      x, z = @round.carrier_at(now)
+      x, z = @round.float_at(now)
       blocker = @round.blocker
       @round.end!(now, result)
       @round.next_at = now + ENDED_MS

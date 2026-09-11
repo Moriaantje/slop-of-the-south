@@ -18,13 +18,13 @@ module Game
       assert_equal "m:1", r.blocker.key
     end
 
-    test "loses when the carrier reaches a standing obstacle and wins once the path is clear" do
+    test "loses when the float reaches a standing obstacle and wins once the path is clear" do
       r = round
       r.start!(START, [])
       before = START + (120 / r.speed * 1000).floor - 1
       assert_nil r.check(before)
       assert_equal :lost, r.check(before + 2)
-      assert_in_delta(-1250 + 120, r.carrier_at(before + 2)[0], 0.01)
+      assert_in_delta(-1250 + 120, r.float_at(before + 2)[0], 0.01)
       r.obstacles.each { |o| 2.times { r.hit(o.key, 10_000, 100) } }
       assert_nil r.check(START + Round::CROSSING_MS - 1)
       assert_equal :won, r.check(START + Round::CROSSING_MS)
