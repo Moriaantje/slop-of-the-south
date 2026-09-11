@@ -29,6 +29,7 @@ class RoadBuilder
     nodes = junction_nodes(profiles)
     pin!(profiles, nodes)
     profiles.each { |road, prof| bridges!(road, prof, crossings[road.id]) }
+    profiles.each_with_index { |(_, prof), ri| decks!(ri, prof, profiles, nodes) }
     pieces = profiles.flat_map { |road, prof| cut_at_junctions(road, prof, nodes) }
     {
       roads: pieces.filter_map { |road, pts| clip(road, pts, x0, y0, x1, y1) },
@@ -91,6 +92,8 @@ class RoadBuilder
 
   BRIDGE_GAP = 4.0      # smoothed road this far above the terrain becomes a bridge instead of an embankment
   BRIDGE_RUN = 3        # …for at least this many samples (24 m)
+  DECK_GRADE = 0.03     # bridge decks climb from both abutments at this grade…
+  DECK_RISE = 1.2       # …until they are this far above the straight line between the abutments
 
   # parts of each road (by id) that lie over water: [[x, y], …] linestrings in RD
   def water_crossings(x0, y0, x1, y1)
@@ -112,8 +115,7 @@ class RoadBuilder
   end
 
   # Mark bridge samples: tagged bridges entirely; otherwise samples over water (with one sample of approach each
-  # side) and runs where the smoothed road floats BRIDGE_GAP above the terrain. Each bridge run gets a straight
-  # deck between its end heights so it never sags.
+  # side) and runs where the smoothed road floats BRIDGE_GAP above the terrain.
   def bridges!(road, prof, crossings)
     prof.each { |p| p[5] = false }
     if road.bridge
@@ -135,7 +137,13 @@ class RoadBuilder
         end
       end
     end
-    # straight decks
+  end
+
+  # Each bridge run gets a deck that climbs at DECK_GRADE from both abutments onto a level DECK_RISE above the
+  # straight line between them, so it never sags and always tops the roads leading onto it. A run that reaches the
+  # end of its way and carries on over the neighbouring way counts that bridge too, so a bridge cut into several
+  # ways ramps up once at each real abutment instead of at every seam.
+  def decks!(ri, prof, profiles, nodes)
     i = 0
     while i < prof.size
       if prof[i][5]
@@ -146,12 +154,32 @@ class RoadBuilder
         ha, hb = prof[a][3], prof[b][3]
         dist = ->(k) { (a...k).sum { |m| Math.hypot(prof[m + 1][0] - prof[m][0], prof[m + 1][1] - prof[m][1]) } }
         total = dist.call(b)
-        (i...j).each { |k| prof[k][3] = total.zero? ? ha : ha + (hb - ha) * dist.call(k) / total } if b > a
+        before = i.zero? ? bridge_beyond(ri, prof.first, profiles, nodes) : 0.0
+        after = j == prof.size ? bridge_beyond(ri, prof.last, profiles, nodes) : 0.0
+        (i...j).each do |k|
+          d = dist.call(k)
+          prof[k][3] = total.zero? ? ha : ha + (hb - ha) * d / total + [ DECK_RISE, DECK_GRADE * [ d + before, total - d + after ].min ].min
+        end if b > a
         i = j
       else
         i += 1
       end
     end
+  end
+
+  # metres of bridge continuing past `p`, the end of way `ri`, through the one way that starts or ends there
+  def bridge_beyond(ri, p, profiles, nodes, seen = [])
+    key = ->(q) { [ (q[0] * 100).round, (q[1] * 100).round ] }
+    node = nodes[key.call(p)]
+    return 0.0 unless node && node[:roads].size == 2
+    oi = (node[:roads] - [ ri ] - seen).first
+    return 0.0 unless oi
+    prof = profiles[oi][1]
+    prof = prof.reverse unless key.call(prof.first) == key.call(p)
+    return 0.0 unless key.call(prof.first) == key.call(p) && prof.first[5]
+    run = prof.take_while { |q| q[5] }
+    length = run.each_cons(2).sum { |q, r| Math.hypot(r[0] - q[0], r[1] - q[1]) }
+    run.size == prof.size ? length + bridge_beyond(oi, prof.last, profiles, nodes, seen + [ ri ]) : length
   end
 
   def near_line?(x, y, line, tol)
