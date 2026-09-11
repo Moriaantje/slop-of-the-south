@@ -14,7 +14,10 @@ module Api
         # play area in RD metres [x0, y0, x1, y1] (the minimap shows this when expanded)
         bounds: World.bounds_rd,
         # province border rings in game units: outside them is a wall of flames
-        border: Boundary.rings_for_client
+        border: Boundary.rings_for_client,
+        # changes whenever tiles:build rewrites public/tiles, so browsers drop their cached tile files (the static
+        # file server sends a two-day max-age)
+        tiles_version: (dir = Rails.root.join("public", "tiles")).exist? ? File.mtime(dir).to_i : 0
       }
     end
   end

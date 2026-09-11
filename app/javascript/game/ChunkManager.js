@@ -71,7 +71,7 @@ export class ChunkManager {
   async load(tx, ty, key) {
     this.tiles.set(key, { loading: true })
     try {
-      let res = await fetch(`/tiles/${tx}_${ty}.json`)          // pre-built static tile
+      let res = await fetch(`/tiles/${tx}_${ty}.json?v=${this.cfg.tiles_version ?? 0}`)   // pre-built static tile; ?v busts the browser cache after a rebuild
       if (!res.ok) res = await fetch(`/api/tiles/${tx}/${ty}`)  // build on demand
       if (!res.ok) throw new Error(`tile ${key}: ${res.status}`)
       const data = await res.json()
