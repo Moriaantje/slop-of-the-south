@@ -1,6 +1,7 @@
 import * as THREE from "three"
 import { TUNING as T } from "game/Tuning"
 import { LOOK } from "game/TerrainTile"
+import { tuneWindows } from "game/BuildingMeshes"
 
 // A full day every 8 minutes, on the wall clock so every player shares the same time of day: the daylight hours
 // (03:45–22:15) take seven of them, the night (22:15–03:45) one, so a night is a short dark minute. Sunrise at 04:30,
@@ -106,6 +107,9 @@ export class DayNight {
     w.hemi.intensity = (0.22 + 0.68 * daylight) * T.look.hemi
     w.renderer.toneMappingExposure = T.look.exposure * (1 + 0.35 * (1 - daylight))
     LOOK.uSat.value = T.look.orthoSat; LOOK.uGain.value = T.look.orthoGain
+    LOOK.uDark.value = 1 - daylight
+    tuneWindows()
+    LOOK.uDetailStrength.value = T.look.detail; LOOK.uDetailFar.value = T.look.detailFar
 
     this.darkness = 1 - daylight
     this.env.darkness = this.darkness

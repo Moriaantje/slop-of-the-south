@@ -21,7 +21,15 @@ test("walls and roof land in separate material buffers with metre UVs", () => {
     let minV = Infinity, maxV = -Infinity
     for (let i = r.start; i < r.start + r.count; i++) { minV = Math.min(minV, uv.getY(i)); maxV = Math.max(maxV, uv.getY(i)) }
     const isWall = r.geo.attributes.position.count === 24
-    if (isWall) { assert.ok(Math.abs(minV) < 1e-6 && Math.abs(maxV - 6) < 1e-6, `wall v 0..6, got ${minV}..${maxV}`) }
+    if (isWall) {
+      assert.ok(Math.abs(minV) < 1e-6 && Math.abs(maxV - 6) < 1e-6, `wall v 0..6, got ${minV}..${maxV}`)
+      const face = r.geo.attributes.faceInfo, meta = r.geo.attributes.faceMeta
+      const widths = new Set(), heights = new Set()
+      for (let i = r.start; i < r.start + r.count; i++) { widths.add(Math.round(face.getZ(i) * 10) / 10); heights.add(Math.round(face.getW(i) * 10) / 10); assert.ok(face.getX(i) >= -1e-6, "u from the face's left edge") }
+      assert.deepEqual([...widths].sort(), [10, 8], "the face widths for the window grid")
+      assert.deepEqual([...heights], [6])
+      assert.equal(meta.getX(r.start), 0, "the face's bottom for the window rows")
+    }
     else assert.ok(maxV - minV > 7.9, "roof v spans the 8 m depth")
   }
 })

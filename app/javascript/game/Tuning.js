@@ -94,6 +94,8 @@ export const TUNING = {
     envIntensity: 0.35,    // how much the sky environment map lights standard materials
     hemi: 0.65,            // hemisphere light scale once the environment map supplies ambient (1 without it)
     orthoSat: 1.1, orthoGain: 0.9,   // saturation and gain of the aerial photo on the terrain
+    detail: 0.9, detailFar: 260,     // the close-range ground grain: strength, and the distance it has faded out by
+    windows: { lit: 0.55, glow: 1.6 }, // share of windows lit at night, and how bright
   },
 }
 
