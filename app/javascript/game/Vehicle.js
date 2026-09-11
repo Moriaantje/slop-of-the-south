@@ -1,8 +1,12 @@
 import * as THREE from "three"
 
-// Arcade bicycle-model car. yaw = 0 faces north (-z); positive yaw turns left.
+// Arcade bicycle-model car. yaw = 0 faces north (-z); positive yaw turns left. The frame runs integrate() (input →
+// speed, heading, position), lets Combat push the car out of whatever it hit, then settle() (terrain contact).
+const DEFAULT_SPEC = { id: "auto", length: 4.1, track: 1.6, ram: 0.1, clear: 0.4, push: false, pushMin: 0 }
+
 export class Vehicle {
-  constructor(spawn) {
+  constructor(spawn, spec = DEFAULT_SPEC) {
+    this.spec = spec
     this.wheelbase = 2.6
     this.track = 1.6
     this.maxSpeed = 44          // m/s ≈ 160 km/h
@@ -41,7 +45,9 @@ export class Vehicle {
 
   forward() { return { x: -Math.sin(this.yaw), z: -Math.cos(this.yaw) } }
 
-  update(dt, input, heightAt) {
+  update(dt, input, heightAt) { this.integrate(dt, input); this.settle(heightAt) }
+
+  integrate(dt, input) {
     // Longitudinal
     const drag = 0.35 * this.speed * Math.abs(this.speed) / this.maxSpeed + 0.8 * Math.sign(this.speed)
     let a = input.throttle * this.accel - drag
@@ -60,8 +66,11 @@ export class Vehicle {
     const f = this.forward()
     this.x += f.x * this.speed * dt
     this.z += f.z * this.speed * dt
+  }
 
-    // Terrain contact and body attitude
+  // Terrain contact and body attitude
+  settle(heightAt) {
+    const f = this.forward()
     const rx = -f.z, rz = f.x                         // right-hand vector
     const hf = heightAt(this.x + f.x * this.wheelbase / 2, this.z + f.z * this.wheelbase / 2)
     const hb = heightAt(this.x - f.x * this.wheelbase / 2, this.z - f.z * this.wheelbase / 2)

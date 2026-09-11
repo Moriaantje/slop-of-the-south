@@ -14,6 +14,9 @@ import { Minimap } from "game/Minimap"
 import { FlameWall } from "game/FlameWall"
 import { Round } from "game/Round"
 import { Carrier } from "game/Carrier"
+import { Destructibles } from "game/Destructibles"
+import { Combat } from "game/Combat"
+import { Effects } from "game/Effects"
 
 async function main() {
   const config = await (await fetch("/api/world")).json()
@@ -30,7 +33,11 @@ async function main() {
   const el = (id) => document.getElementById(id)
 
   const world   = new World(container)
-  const chunks  = new ChunkManager(world.scene, config)
+  const effects = new Effects(world.scene)
+  const index   = new Destructibles(effects)                // every object a player can flatten, in a grid
+  const chunks  = new ChunkManager(world.scene, config, { onTile: (t) => index.indexTile(t), onDrop: (t) => index.dropTile(t) })
+  index.heightAt = (x, z) => chunks.heightAt(x, z)
+  const combat  = new Combat({ index, effects, send: (action, data) => net.send(action, data) })
   const input   = new Input()
   const car     = new Vehicle(config.spawn)
   const remotes = new RemoteCars(world.scene)
@@ -45,14 +52,16 @@ async function main() {
   // the round: a new arena restores the world, a start drops everyone at the arena spawn (a page load mid-round too)
   const round = new Round(playerId, { ronde: el("ronde"), actie: el("actie"), banner: el("banner"), bannerTitel: el("banner-titel"), bannerSub: el("banner-sub"), flits: el("flits") }, {
     onRound: (body, { fresh, started, live }) => {
-      if (fresh) chunks.reload()
+      if (fresh) { chunks.reload(); index.resetRound(); combat.reset() }
+      index.applyAll(body.obstacles.concat(body.objects))
       carrier.setRound(round)
       if (body.status === "running" && (started || !live && !urlSpawn)) { config.spawn = body.spawn; teleport(body.spawn.x, body.spawn.z, body.spawn.yaw) }
     },
-    onEnd: () => carrier.hide(),
+    onObjects: (list) => index.applyAll(list),
+    onEnd: (msg) => { carrier.hide(); combat.enabled = false; if (msg.result === "lost") index.cosmeticWipe(msg.x, msg.z, 300) },
     onAction: (msg) => { if (msg.type === "teleport") teleport(msg.x, msg.z) },
   })
-  window.slop = { world, dayNight, car, remotes, chunks, round, carrier }     // for poking at the scene from the console
+  window.slop = { world, dayNight, car, remotes, chunks, round, carrier, index, combat, effects }     // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
@@ -104,7 +113,10 @@ async function main() {
         world.followCamera(car, 1e3)   // huge dt → camera jumps straight behind the car instead of rising out of the ground
         placed = true
       }
-      car.update(dt, input, (x, z) => chunks.heightAt(x, z))
+      car.integrate(dt, input)
+      combat.enabled = round.running
+      combat.collide(car, dt)
+      car.settle((x, z) => chunks.heightAt(x, z))
     }
     // the edge of the world: cross the province border and you burn back to where you were
     if (wall) {
@@ -122,11 +134,12 @@ async function main() {
       }
     }
     world.followCamera(car, dt)
+    effects.update(dt, world.camera)
     remotes.update(car, world.camera)
     carrier.update(round.now(), dt, chunks, car, world.camera)
 
     netTimer += dt
-    if (netTimer > 0.1) { netTimer = 0; net.sendMove(car.state()) }
+    if (netTimer > 0.1) { netTimer = 0; net.sendMove(car.state()); combat.flush() }
 
     signTimer += dt
     if (signTimer > 0.25) {

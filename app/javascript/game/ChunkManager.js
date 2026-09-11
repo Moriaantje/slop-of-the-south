@@ -9,13 +9,15 @@ import { buildSigns } from "game/Signs"
 import { paintCover, buildWater } from "game/Cover"
 import { ROAD_LIFT } from "game/Roads"
 
-// Streams 500 m tiles in a square around the player and disposes the ones left behind.
+// Streams 500 m tiles in a square around the player and disposes the ones left behind. Every destructible object a
+// tile builds is registered on the tile entry; hooks.onTile / hooks.onDrop hand them to the Destructibles index.
 export class ChunkManager {
-  constructor(scene, config, radius = 2) {
+  constructor(scene, config, hooks = {}, radius = 2) {
     this.scene = scene
     this.cfg = config
+    this.hooks = hooks
     this.radius = radius
-    this.tiles = new Map()     // key "tx_ty" → { group, terrain } or { loading: true }
+    this.tiles = new Map()     // key "tx_ty" → { group, terrain, roads, biome, objects } or { loading: true }
   }
 
   // game coords → tile indices (RD metres / tile size)
@@ -82,6 +84,7 @@ export class ChunkManager {
       const data = await res.json()
       if (!this.tiles.has(key)) return                          // player already moved away
 
+      const objects = new Map(), reg = (key, handle) => objects.set(key, handle)
       const terrain = new TerrainTile(data, this.cfg, data.cover?.length ? paintCover(data.cover) : null)
       const group = new THREE.Group()
       group.add(terrain.mesh)
@@ -89,18 +92,20 @@ export class ChunkManager {
       if (water) group.add(water)
       const roads = buildRoads(data.roads, data.junctions, data.biome)
       if (roads) group.add(roads)
-      const buildings = buildBuildings(data.buildings)
+      const buildings = buildBuildings(data.buildings, reg)
       if (buildings) group.add(buildings)
-      const meshes = buildBuildingMeshes(data.meshes)
+      const meshes = buildBuildingMeshes(data.meshes, reg)
       if (meshes) group.add(meshes)
-      const trees = buildTrees(data.trees, (x, z) => terrain.heightAt(x, z))
+      const trees = buildTrees(data.trees, (x, z) => terrain.heightAt(x, z), reg)
       if (trees) group.add(trees)
       if (data.furniture) {                                       // lamp posts, traffic lights, traffic signs
         const ground = (x, z) => roadHeight(data.roads, x, z) ?? terrain.heightAt(x, z)
-        for (const part of [buildLamps(data.furniture.lamps, ground), buildSignals(data.furniture.signals, ground), buildSigns(data.furniture.signs, ground)]) if (part) group.add(part)
+        for (const part of [buildLamps(data.furniture.lamps, ground, reg), buildSignals(data.furniture.signals, ground, reg), buildSigns(data.furniture.signs, ground, reg)]) if (part) group.add(part)
       }
       this.scene.add(group)
-      this.tiles.set(key, { group, terrain, roads: data.roads, biome: data.biome })
+      const tile = { group, terrain, roads: data.roads, biome: data.biome, objects }
+      this.tiles.set(key, tile)
+      this.hooks.onTile?.(tile)
     } catch (e) {
       console.warn(e)
       this.tiles.delete(key)
@@ -108,6 +113,7 @@ export class ChunkManager {
   }
 
   dispose(t) {
+    this.hooks.onDrop?.(t)
     this.scene.remove(t.group)
     t.group.traverse((o) => {
       o.userData.onDispose?.()                                             // e.g. traffic lights leave the animation set

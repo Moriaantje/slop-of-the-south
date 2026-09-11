@@ -1,10 +1,12 @@
 import * as THREE from "three"
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js"
+import { pointKey, collapseRange } from "game/Destructibles"
 
 // NDW traffic signs drawn from the RVV sign catalogue. Every sign face is painted procedurally on a canvas from its RVV
 // code (A1 speed limit, B6 yield, G11 cycle path …) plus the value on it (black code) or its text, cached per look.
 // Tile entries: [x, z, face, code, black?, text?] with face the compass direction the sign face points to. Signs at the
-// same spot share a pole and hang below each other (main sign at 2.3 m, onderborden beneath).
+// same spot share a pole and hang below each other (main sign at 2.3 m, onderborden beneath). With `reg` every pole
+// registers one destructible handle carrying the keys of all its signs; knocking it down collapses every part.
 const RED = "#c8102e", BLUE = "#0d4f9e", WHITE = "#f4f4f0", YELLOW = "#f7c600", BLACK = "#111111", GREY = "#8c8c8c", GREEN = "#1a8a3a"
 const FONT = "Arial, Helvetica, sans-serif"
 
@@ -12,7 +14,7 @@ const poleMat = Object.assign(new THREE.MeshStandardMaterial({ color: 0x9a9a98, 
 const backMat = Object.assign(new THREE.MeshStandardMaterial({ color: 0x7d7f80, roughness: 0.7, metalness: 0.4 }), { __shared: true })
 const materials = new Map()
 
-export function buildSigns(signs, heightAt) {
+export function buildSigns(signs, heightAt, reg) {
   if (!signs?.length) return null
   // group signs on one pole: same spot (60 cm), main signs first so onderborden hang below them
   const sorted = [...signs].sort((a, b) => rank(a[3]) - rank(b[3]))
@@ -22,9 +24,10 @@ export function buildSigns(signs, heightAt) {
     if (!pole) { pole = { x: s[0], z: s[1], face: s[2], list: [] }; poles.push(pole) }
     pole.list.push(s)
   }
-  const byMat = new Map()
-  const add = (mat, geo) => { if (!byMat.has(mat)) byMat.set(mat, []); byMat.get(mat).push(geo) }
+  const byMat = new Map(), handles = []
+  const add = (mat, geo) => { if (!byMat.has(mat)) byMat.set(mat, []); byMat.get(mat).push(geo); return { mat, idx: byMat.get(mat).length - 1 } }
   for (const pole of poles) {
+    const parts = []
     const base = heightAt(pole.x, pole.z)
     const rotY = Math.PI - pole.face * Math.PI / 180              // plane normal → compass `face`
     const nx = Math.sin(pole.face * Math.PI / 180), nz = -Math.cos(pole.face * Math.PI / 180)
@@ -37,20 +40,33 @@ export function buildSigns(signs, heightAt) {
       else y -= h / 2
       const face = new THREE.PlaneGeometry(w, h)
       face.rotateY(rotY); face.translate(pole.x + nx * 0.05, base + y, pole.z + nz * 0.05)
-      add(material(look), face)
+      parts.push(add(material(look), face))
       const back = new THREE.PlaneGeometry(w, h)
       back.rotateY(rotY + Math.PI); back.translate(pole.x + nx * 0.03, base + y, pole.z + nz * 0.03)
-      add(backMat, back)
+      parts.push(add(backMat, back))
       y -= h / 2 + 0.06
     }
     if (top === null) continue
     const pg = new THREE.CylinderGeometry(0.035, 0.04, top, 6)
     pg.translate(pole.x, base + top / 2, pole.z)
-    add(poleMat, pg)
+    parts.push(add(poleMat, pg))
+    handles.push({ pole, parts })
   }
   if (!byMat.size) return null
-  const group = new THREE.Group()
-  for (const [mat, geos] of byMat) { const merged = mergeGeometries(geos, false); geos.forEach((g) => g.dispose()); group.add(new THREE.Mesh(merged, mat)) }
+  const group = new THREE.Group(), merged = new Map()
+  for (const [mat, geos] of byMat) {
+    const starts = [], counts = []
+    for (const g of geos) { starts.push(starts.length ? starts.at(-1) + counts.at(-1) : 0); counts.push(g.attributes.position.count) }
+    const geo = mergeGeometries(geos, false); geos.forEach((g) => g.dispose())
+    group.add(new THREE.Mesh(geo, mat))
+    merged.set(mat, { geo, starts, counts })
+  }
+  if (reg) for (const { pole, parts } of handles) {
+    let removed = false
+    const remove = () => { if (removed) return; removed = true; for (const { mat, idx } of parts) { const m = merged.get(mat); collapseRange(m.geo.attributes.position, m.starts[idx], m.counts[idx]) } }
+    const keys = [...new Set(pole.list.map((s) => pointKey("s", s[0], s[1])))]
+    reg(keys[0], { kind: "s", keys, x: pole.x, z: pole.z, r: 0.3, h: 2.5, max: 6, remove })
+  }
   return group
 }
 

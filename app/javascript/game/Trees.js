@@ -1,9 +1,11 @@
 import * as THREE from "three"
+import { pointKey, hideInstance } from "game/Destructibles"
 
 // Procedural low-poly trees: trunk, recursive branches and leaf clusters at the tips. A handful of variants per
 // kind is generated once from fixed seeds; every tree picks its variant, rotation, width and tint from a hash of
 // its position, so the same tree always stands in the same place looking the same. Tiles draw one InstancedMesh
-// per variant. Tile entries: [x, z, kind, height] with kind 0 street/park tree, 1 broadleaf wood, 2 conifer.
+// per variant. Tile entries: [x, z, kind, height] with kind 0 street/park tree, 1 broadleaf wood, 2 conifer. With
+// `reg` every tree registers a destructible handle keyed by its position; a felled tree is a zero-scale instance.
 const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, side: THREE.DoubleSide })
 material.__shared = true
 
@@ -20,7 +22,7 @@ const ICO = new THREE.IcosahedronGeometry(1, 0).attributes.position   // 20-face
 const geometries = {}
 for (const kind of [0, 1, 2, 3]) geometries[kind] = Array.from({ length: VARIANTS[kind] }, (_, i) => buildVariant(kind, 1000 * (kind + 1) + 7 * i))
 
-export function buildTrees(trees, heightAt) {
+export function buildTrees(trees, heightAt, reg) {
   if (!trees?.length) return null
   const groups = new Map()
   for (const t of trees) {
@@ -41,6 +43,7 @@ export function buildTrees(trees, heightAt) {
       s.set(h * width, h, h * width)                           // geometry is 1 unit tall
       mesh.setMatrixAt(i, m.compose(p.set(x, heightAt(x, z) - 0.15, z), q, s))
       mesh.setColorAt(i, color.setRGB(tint, tint * (0.97 + 0.06 * rand(x, z + 2)), tint * 0.95))
+      reg?.(pointKey("t", x, z), { kind: "t", x, z, r: THREE.MathUtils.clamp(0.08 * h, 0.3, 1), h, max: 30, remove: () => hideInstance(mesh, i) })
     })
     mesh.instanceMatrix.needsUpdate = true
     mesh.instanceColor.needsUpdate = true
