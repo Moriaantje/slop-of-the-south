@@ -39,7 +39,7 @@ export class World {
     const k = 1 - Math.exp(-dt * 5)
     if (this.camera.position.lengthSq() === 0) this.camera.position.copy(this._camTarget)
     this.camera.position.lerp(this._camTarget, k)
-    this._lookAt.set(car.x + f.x * 4, car.y + 1.2, car.z + f.z * 4)
+    this._lookAt.set(car.x + f.x * 4, car.y + 2.0, car.z + f.z * 4)   // a little sky above the horizon
     this.camera.lookAt(this._lookAt)
   }
 

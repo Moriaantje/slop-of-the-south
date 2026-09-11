@@ -59,14 +59,18 @@ export class DayNight {
     if (elev > -0.05) w.sun.position.set(Math.cos(a) * 600, up * 600, Math.sin(a) * 300 + 80)
     else w.sun.position.set(-Math.cos(a) * 400, 500, -Math.sin(a) * 200 + 150)
 
-    // sun disc: along the sun direction, reddening and fading as it touches the horizon
+    // sun disc: along the sun's compass direction, reddening and fading as it touches the horizon. The chase camera
+    // only sees ~20° above the horizon, so the disc rides a flattened arc (2° at the horizon, 18° at noon) instead
+    // of the true elevation the light uses
     const cam = w.camera.position
-    this._dir.set(Math.cos(a), elev, Math.sin(a) * 0.5 + 0.13).normalize()
+    const sunAlt = THREE.MathUtils.degToRad(2 + 16 * elev)
+    this._dir.set(Math.cos(a), 0, Math.sin(a) * 0.5 + 0.13).normalize().multiplyScalar(Math.cos(sunAlt)).setY(Math.sin(sunAlt))
     this.sunSprite.position.copy(cam).addScaledVector(this._dir, SKY_DISTANCE)
     this.sunSprite.material.opacity = smoothstep(-0.03, 0.06, elev)
     this.sunSprite.material.color.copy(this._c.copy(SUN_DAY).lerp(SUN_LOW, dusk))
     // moon: opposite the sun, up all night, gone by day
-    this._dir.set(-Math.cos(a), Math.max(-elev, 0) * 0.14 + 0.05, -Math.sin(a) * 0.5 + 0.2).normalize()   // a low moon: the chase camera sees ~20° up
+    const moonAlt = THREE.MathUtils.degToRad(3 + 13 * Math.max(-elev, 0))                      // same flattened arc for the moon
+    this._dir.set(-Math.cos(a), 0, -Math.sin(a) * 0.5 + 0.2).normalize().multiplyScalar(Math.cos(moonAlt)).setY(Math.sin(moonAlt))
     this.moonSprite.position.copy(cam).addScaledVector(this._dir, SKY_DISTANCE)
     this.moonSprite.material.opacity = smoothstep(0.02, 0.2, -elev)
     w.sun.color.copy(daylight > 0.02 ? this._c.copy(SUN_DAY).lerp(SUN_LOW, dusk) : MOON)
