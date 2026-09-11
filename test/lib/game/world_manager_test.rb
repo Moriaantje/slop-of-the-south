@@ -105,5 +105,32 @@ module Game
       assert_empty @m.world.objects
       assert_equal "heal", @room.last[:type]
     end
+  
+
+    test "strike goes through the actors and the room hears the dragon's hp; refusals return to the asker" do
+      striker = Object.new
+      def striker.snapshot(_now) = []
+      def striker.tick(_now, _sessions) = {}
+      def striker.strike(session, dragon_id, damage, kind, _now) = dragon_id == "d1" ? { type: "strike", dragon_id:, hp: 540, by: session.id, kind:, killed: false } : "dragon"
+      m = WorldManager.new("strike", hubs: FakeWorld::HUBS, store: @store, actors: striker, publish: ->(p) { @room << p }, publish_to: ->(_, _) {}, threaded: false)
+      m.join("p1", "Piet", T)
+      ok, payload = m.strike("p1", "d1", 60, "fireball", T)
+      assert ok
+      assert_equal [ "strike", "d1", 540, "p1" ], payload.values_at(:type, :dragon_id, :hp, :by)
+      assert_equal "strike", @room.last[:type]
+      ok, payload = m.strike("p1", "d2", 60, "fireball", T)
+      refute ok
+      assert_equal "dragon", payload[:reason]
+      ok, payload = m.strike("nobody", "d1", 60, "fireball", T)
+      refute ok
+      assert_equal "player", payload[:reason]
+    end
+
+    test "the default actors are the dragons of the lair hubs" do
+      m = WorldManager.new("dragons", hubs: FakeWorld::HUBS, store: @store, publish: ->(_) {}, publish_to: ->(_, _) {}, threaded: false)
+      sync = m.join("p1", "Piet", T)
+      assert_equal [ "dragon" ], sync[:actors].map { _1[:kind] }
+      assert_equal "o:w3", sync[:actors].first[:lair]
+    end
   end
 end

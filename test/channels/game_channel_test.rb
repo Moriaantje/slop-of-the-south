@@ -33,6 +33,11 @@ class GameChannelTest < ActionCable::Channel::TestCase
     assert_nil @manager.world.objects["m:2"]
   end
 
+  test "a refused strike comes back to the asker only" do
+    perform :strike, dragon_id: "d1", damage: 60, kind: "fireball"
+    assert_equal [ "strike", false, "actors" ], transmissions.last.values_at("type", "ok", "reason")
+  end
+
   test "a refused teleport comes back to the asker only" do
     perform :teleport, hub_key: "p:2"
     assert_equal [ "teleport", false, "undiscovered" ], transmissions.last.values_at("type", "ok", "reason")

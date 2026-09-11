@@ -1,9 +1,9 @@
 # One room = one stream, plus a personal stream per player for what only they should hear (their hp, gold, quests).
 # Clients send `move` ~10x/second, which the server relays; `hit` reports damage, `fire` shows a trick to the
-# others, `teleport` jumps to a discovered hub, `switch` picks a vehicle. The room's Game::WorldManager owns the
+# others, `strike` reports a spell hit on a dragon, `teleport` jumps to a discovered hub, `switch` picks a vehicle. The room's Game::WorldManager owns the
 # world; a new subscriber gets the whole state in a `sync`.
 class GameChannel < ApplicationCable::Channel
-  RATES = { "move" => 15, "hit" => 20, "fire" => 10, "teleport" => 2, "switch" => 2 }.freeze   # messages per second
+  RATES = { "move" => 15, "hit" => 20, "fire" => 10, "strike" => 10, "teleport" => 2, "switch" => 2 }.freeze   # messages per second
   MAX_HITS = 32
 
   def subscribed
@@ -53,6 +53,12 @@ class GameChannel < ApplicationCable::Channel
     broadcast(type: "fire", name: @name, kind: data["kind"].to_s.first(16),
               x: data["x"].to_f, y: data["y"].to_f, z: data["z"].to_f, yaw: data["yaw"].to_f, pitch: data["pitch"].to_f,
               target: target.presence, t: Game.now_ms)
+  end
+
+  # data: { dragon_id, damage, kind }: a spell hit a dragon; the manager validates and broadcasts the dragon's hp
+  def strike(data)
+    return unless allowed?("strike")
+    answer manager.strike(player_id, data["dragon_id"].to_s.first(8), data["damage"].to_f, data["kind"].to_s.first(16))
   end
 
   # data: { hub_key }: to a hub you have discovered

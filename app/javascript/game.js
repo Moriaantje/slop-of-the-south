@@ -7,6 +7,7 @@ import { DayNight } from "game/DayNight"
 import { updateWater } from "game/Cover"
 import { Avatar } from "game/Avatar"
 import { Spells } from "game/Spells"
+import { Dragons } from "game/Dragons"
 import { Input } from "game/Input"
 import { Network } from "game/Network"
 import { RemoteCars } from "game/RemoteCars"
@@ -53,7 +54,7 @@ async function main() {
   world.setHeightAt((x, z) => chunks.heightAt(x, z))
   const input   = new Input()
   const assets  = new Assets()                               // glTF models for dragons, the mech and the townsfolk
-  assets.warm(["mech"])
+  assets.warm(["mech", "dragon"])
   // the player: a car and a wizard mech, one of them active (T transforms); `car` is the same object, kept under the
   // old name because the camera, the HUD and the network only ever see the active body through it
   const player  = new Avatar({ spawn: config.spawn, spec: vehicleSpec(localStorage.getItem("voertuig") ?? "trike"), scene: world.scene, assets,
@@ -96,6 +97,8 @@ async function main() {
   const spells = new Spells({ combat, effects, send: (a, d) => net.send(a, d), heightAt: (x, z) => chunks.heightAt(x, z),
     hud: { nope: () => { boostEl.classList.add("nope"); setTimeout(() => boostEl.classList.remove("nope"), 350); session.flash("Te weinig mana") } } })
 
+  // the dragons: drawn from the server's `actors` messages; the spells aim at them and report hits
+  let dragons = null
   // the session: who you are in the world, and what the server decides about you
   const session = new Session(playerId, { actie: el("actie"), banner: el("banner"), bannerTitel: el("banner-titel"), bannerSub: el("banner-sub"), flits: el("flits"), status: el("status") }, {
     onSync: (msg) => {
@@ -115,12 +118,21 @@ async function main() {
     },
     onBurn: (msg) => {
       if (msg.id !== playerId) return
-      if (msg.shielded) return
-      burn(180); effects.shake(0.3); car.speed *= 0.7
+      if (msg.shielded) { if (player.mode === "mech") player.mech.mana = Math.max(0, player.mech.mana - 0.06); return }
+      burn(180); effects.shake(0.3)
+      if (player.mode === "mech") { const f = player.forward(); player.kick(-f.x * 4, -f.z * 4) } else car.speed *= 0.7
     },
     onHeal: () => { chunks.reload(); index.resetState(); combat.reset() },
+    onActors: (list, now) => dragons?.receive(list, now),
+    onStrike: (msg) => dragons?.strike(msg),
   })
-  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, player, spells, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
+  const doelwitEl = el("doelwit"), doelwitNaam = el("doelwit-naam"), doelwitBar = el("doelwit-bar"), hitmarkEl = el("hitmark")
+  dragons = new Dragons({ scene: world.scene, assets, effects, session, send: (a, d) => net.send(a, d), heightAt: (x, z) => chunks.heightAt(x, z),
+    hud: { hit: () => { hitmarkEl.classList.remove("on"); void hitmarkEl.offsetWidth; hitmarkEl.classList.add("on") } } })
+  spells.targets = (x, z, yaw) => dragons.nearest(x, z, yaw)
+  spells.onStrike = (target, kind) => dragons.struck(target, kind)
+  combat.onStrike = (target, kind) => dragons.struck(target, kind)
+  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, player, spells, dragons, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
@@ -226,6 +238,7 @@ async function main() {
     if (placed) shadow.place(car.x, car.y, car.z, car.yaw, car.mesh.position.y - car.y, darkness)   // car.y is the driving surface; the mesh floats above it in the air
     effects.update(dt, world.camera)
     remotes.update(car, world.camera)
+    dragons.update(car, world.camera, dt, darkness)
     if (loading.open && placed && chunks.readyFraction(car.x, car.z) >= 1) loading.hide()
 
     netTimer += dt
@@ -244,6 +257,10 @@ async function main() {
       clockEl.textContent = dayNight.clock()
       session.hud()
       if (loading.open) loading.progress(placed ? chunks.readyFraction(car.x, car.z) : 0)
+      // the dragon in your sights (or the nearest awake one): name and hp
+      const aimed = dragons.aimed(car)
+      doelwitEl.hidden = !aimed
+      if (aimed) { doelwitNaam.textContent = aimed.name; doelwitBar.style.transform = `scaleX(${Math.max(0, aimed.hp / aimed.max)})` }
     }
     minimap.update(car, remotes, overlay)
 

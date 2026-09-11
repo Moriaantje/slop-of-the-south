@@ -25,13 +25,14 @@ module Game
       def shutdown = @lock.synchronize { @managers.each_value(&:stop); @managers.clear }
     end
 
-    attr_reader :room, :sessions, :world, :actors, :quests
+    attr_reader :room, :sessions, :world, :quests
 
-    def initialize(room, hubs: nil, store: nil, actors: nil, quests: nil, publish: nil, publish_to: nil, threaded: true)
+    # actors: :default builds the dragons from the lair hubs; pass nil for none (tests pass their own)
+    def initialize(room, hubs: nil, store: nil, actors: :default, quests: nil, publish: nil, publish_to: nil, threaded: true)
       @room, @threaded = room, threaded
       @hubs_given = hubs
       @store = store || PlayerStore.new
-      @actors, @quests = actors, quests
+      @actors_arg, @quests = actors, quests
       @publish    = publish    || ->(payload)     { ActionCable.server.broadcast("game:#{room}", payload) }
       @publish_to = publish_to || ->(id, payload) { ActionCable.server.broadcast("game:#{room}:p:#{id}", payload) }
       @mutex, @sessions, @world, @dirty = Mutex.new, {}, Destructibles.new, {}
@@ -42,6 +43,11 @@ module Game
 
     # hub key → Hub::Ref, loaded once (the hubs table changes only when hubs:build runs)
     def hubs = @hubs ||= (@hubs_given || Hub.refs).to_h { [ _1.key, _1 ] }
+
+    def actors
+      return @actors if defined?(@actors)
+      @actors = @actors_arg == :default ? Actors::Dragons.new(hubs) : @actors_arg
+    end
 
     # returns the `sync` payload for the new subscriber; the same player in several tabs is counted once
     def join(player_id, name, now = Game.now_ms)
@@ -54,7 +60,7 @@ module Game
         s.changed = true
         @empty_since = nil
         { now:, you: you(s), players: @sessions.values.map { { id: _1.id, name: _1.name, vehicle: _1.vehicle } },
-          objects: @world.damaged.map { @world.obj_h(_1) }, actors: @actors&.snapshot(now) || [], quests: @quests&.for_player(s) || [] }
+          objects: @world.damaged.map { @world.obj_h(_1) }, actors: actors&.snapshot(now) || [], quests: @quests&.for_player(s) || [] }
       end
     end
 
@@ -108,6 +114,17 @@ module Game
       end
     end
 
+    # a spell hit a dragon: the actors validate (alive, kind, damage cap, within 300 m) and the room hears the new hp
+    def strike(player_id, dragon_id, damage, kind, now = Game.now_ms)
+      result = @mutex.synchronize do
+        s = @sessions[player_id] or next "player"
+        actors.respond_to?(:strike) ? actors.strike(s, dragon_id, damage, kind, now) : "actors"
+      end
+      return [ false, { type: "strike", ok: false, reason: result } ] if result.is_a?(String)
+      @publish.call(result.merge(now:))
+      [ true, result ]
+    end
+
     # Dragon fire (or anything else that hurts): takes hp unless the player holds a shield, tells the room so every
     # screen shows it, and kills at zero. Call under the mutex from a tick, or on its own otherwise.
     def burn(session, damage, x, z, now, room_msgs, personal_msgs)
@@ -125,8 +142,8 @@ module Game
     def tick(now = Game.now_ms)
       room_msgs, personal_msgs, saves = [], [], []
       @mutex.synchronize do
-        if @actors
-          result = @actors.tick(now, @sessions.values) || {}
+        if actors
+          result = actors.tick(now, @sessions.values) || {}
           room_msgs.concat(result[:messages] || [])
           (result[:burns] || []).each { |id, damage, x, z| (s = @sessions[id]) && burn(s, damage, x, z, now, room_msgs, personal_msgs) }
           (result[:hits] || []).each { |key, damage, max| (obj = @world.hit(key, damage, max)) && @dirty[obj.key] = obj }

@@ -22,6 +22,10 @@
   <%# banner in the middle of the screen: death, quest events %>
   <div id="banner" class="bord" hidden><div id="banner-titel"></div><div id="banner-sub" class="bord-wijk"></div></div>
   <div id="flits" hidden></div>
+  <%# the dragon you are aiming at (Dragons.js): name and hit points %>
+  <div id="doelwit" hidden><span id="doelwit-naam"></span><div class="hpbar"><i id="doelwit-bar"></i></div></div>
+  <%# a spell landed %>
+  <div id="hitmark"></div>
   <%# the vehicle you drive and its trick (Vehicles.js); the bar fills while the trick recharges %>
   <div id="voertuig"><b id="voertuig-naam"></b> <span id="voertuig-hint"></span><div class="cooldown"><i id="cooldown-bar"></i></div></div>
   <div id="speed">
@@ -83,6 +87,14 @@
   #flits { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); background: rgba(18, 22, 30, .85); color: #fff;
            padding: 10px 18px; border-radius: 8px; font-size: 16px; white-space: nowrap; }
   #biome { font-style: italic; text-transform: capitalize; }
+  #doelwit { position: absolute; left: 50%; top: 24px; transform: translateX(-50%); min-width: 260px; text-align: center; font-size: 15px; font-weight: 700;
+             background: rgba(18, 22, 30, .8); color: #ffb08a; padding: 7px 16px 9px; border-radius: 8px; }
+  #doelwit .hpbar { height: 6px; margin-top: 6px; background: rgba(255, 255, 255, .18); border-radius: 3px; overflow: hidden; }
+  #doelwit .hpbar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #e0241a, #ff8a3a); transform-origin: left; }
+  #hitmark { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; opacity: 0;
+             background: conic-gradient(from 45deg, #fff 0 25%, transparent 0 50%, #fff 0 75%, transparent 0); border-radius: 50%; }
+  #hitmark.on { animation: hitmark .35s ease-out; }
+  @keyframes hitmark { 0% { opacity: 1; transform: scale(1.6); } 100% { opacity: 0; transform: scale(0.8); } }
   #clock { font-variant-numeric: tabular-nums; }
   #biome:empty { display: none; }
   #players:empty { display: none; }

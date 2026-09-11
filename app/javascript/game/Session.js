@@ -2,7 +2,7 @@
 // discovered, the teleport cooldown, and every Dutch string on the status HUD. Messages handled: sync (on
 // subscribe), you (hp/gold/xp), discover, teleport/switch (verdicts), death, burn, heal, object. Hooks: onSync(msg),
 // onObjects(list), onTeleport(msg) and onSwitch(msg) for the player's own accepted actions, onDeath(msg) (everyone's),
-// onBurn(msg), onDiscover(hub), onHeal().
+// onBurn(msg), onDiscover(hub), onHeal(), onActors(list, now) for the dragons, onStrike(msg) for a spell landing on one.
 const REASONS = {
   cooldown: (s) => `Teleporteren kan weer over ${s.countdown()}`,
   undiscovered: () => "Die plek heb je nog niet ontdekt",
@@ -37,6 +37,7 @@ export class Session {
         this.nextActionAt = msg.you.next_action_at
         this.hooks.onSync?.(msg)
         this.hooks.onObjects?.(msg.objects ?? [])
+        this.hooks.onActors?.(msg.actors ?? [], msg.now)
         break
       case "you":
         if (this.you) Object.assign(this.you, { hp: msg.hp, gold: msg.gold, xp: msg.xp, level: msg.level })
@@ -62,6 +63,11 @@ export class Session {
         break
       case "burn": this.hooks.onBurn?.(msg); break
       case "heal": this.hooks.onHeal?.(); break
+      case "actors": this.hooks.onActors?.(msg.list, msg.now); break
+      case "strike":
+        if (msg.ok === false) { if (msg.reason !== "range" && msg.reason !== "dead") this.flash("De spreuk miste") }
+        else this.hooks.onStrike?.(msg)
+        break
     }
     this.hud()
   }
