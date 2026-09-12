@@ -17,7 +17,8 @@ import { Quality } from "game/Quality"
 import { Grass, GRASS_UNIFORMS } from "game/Grass"
 import { Props } from "game/Props"
 import { Scatter } from "game/Scatter"
-import { TREE_UNIFORMS } from "game/Trees"
+import { TREE_UNIFORMS, updateTreeLod, treeVariants } from "game/Trees"
+import { WIND } from "game/Wind"
 import { flag } from "game/Flags"
 import { textureStats } from "game/Textures"
 import { Input } from "game/Input"
@@ -67,10 +68,11 @@ async function main() {
   const input   = new Input()
   const assets  = new Assets()                               // glTF models for dragons, the mech and the townsfolk
   assets.warm(["mech", "npc_a", "npc_b", "npc_c"])
+  for (const kind of [0, 1, 2, 3]) treeVariants(kind)          // paint every tree atlas now, while the loading screen is up
   // the player: a car and a wizard mech, one of them active (T transforms); `car` is the same object, kept under the
   // old name because the camera, the HUD and the network only ever see the active body through it
   const player  = new Avatar({ spawn: config.spawn, spec: vehicleSpec(localStorage.getItem("voertuig") ?? "trike"), scene: world.scene, assets,
-                               heightAt: (x, z) => chunks.heightAt(x, z), waterAt: (x, z) => chunks.waterLevelAt(x, z), onMode: (mode) => onMode(mode) })
+                               heightAt: (x, z) => chunks.heightAt(x, z), waterAt: (x, z) => chunks.waterLevelAt(x, z), onMode: (mode) => onMode(mode), effects })
   const car     = player
   let carFx     = new VehicleFx(player.car.mesh, effects.smoke)
   const combat  = new Combat({ scene: world.scene, index, effects, heightAt: (x, z) => chunks.heightAt(x, z), car: player, send: (action, data) => net.send(action, data) })
@@ -233,6 +235,8 @@ async function main() {
     air.update(dt, world.camera, dayNight.env, car.y)
     TREE_UNIFORMS.uTime.value += dt; GRASS_UNIFORMS.uTime.value += dt
     TREE_UNIFORMS.uSunDir.value.copy(dayNight.env.sunDir)
+    WIND.uWindGust.value = TUNING.look.wind
+    updateTreeLod(car.x, car.z)                                 // near geometry, far cards, nothing past the tiles
     grass.update(chunks.tiles, ...chunks.tileIndex(car.x, car.z), car.x, car.z)
     car.setNight(darkness); remotes.setNight(darkness); setNightLevel(darkness); setSignsNight(darkness)
     updateWater(dayNight.env, timer.getElapsed())

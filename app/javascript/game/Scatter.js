@@ -1,76 +1,156 @@
 import * as THREE from "three"
 import { nearRoad, insideRing, insideAny, inBuilding, hash } from "game/Placement"
+import { noiseTexture } from "game/Textures"
+import { KIT, kitPiece, kitStoneMaterial } from "game/Kit"
 
 // The world between the roads and the houses: what a Limburg landscape is actually full of. The BGT land cover
-// already says where every meadow, field, wood, orchard and yard lies, so the props go where they belong —
-// hedgerows and fence posts along the field boundaries (the hedge banks that divide the whole province), hay bales
-// and a cart on the arable land, bushes and boulders in the woods and verges, barrels, crates and planters in the
-// farmyards, benches and flowers in the urban green. Placement is deterministic per tile (a hash of the position),
-// computed once when the tile arrives, and the props are drawn from global instanced pools that are refilled only
-// when the loaded tiles change: a thousand barrels cost one draw call. Boulders are generated here; the rest are
-// the CC0 kit models (Assets.MODELS, public/models/props).
+// already says where every meadow, field, wood, orchard and yard lies, so the props go where they belong — hedge
+// banks and fence posts along the field boundaries that divide the whole province, hay bales and a cart on the
+// arable, brambles, stumps and cordwood in the woods, molehills and wild flowers in the meadows, reed beds along
+// every watercourse, dry-stone walls on the Zuid-Limburg banks and a five-bar gate where a hedge breaks for a track.
+// Placement is deterministic per tile (a hash of the position), computed once when the tile arrives, and the props
+// are drawn from global instanced pools refilled only when the loaded tiles change: a thousand barrels cost one
+// draw call. Most of the pieces are generated in Kit.js, which means most of them cannot fail to load; the rest are
+// the CC0 kit models (Assets.MODELS, public/models/props) and those get the weathering pass below.
+//
+// Weathering is the difference between a kit and a place. A flat-coloured barrel is a toy; the same barrel with a
+// slow tint that varies over tens of metres, a fine grain over centimetres, dirt gathered at its foot and moss
+// creeping up the shaded side is a barrel that has stood in a yard. It is all done in the fragment shader from one
+// shared noise texture, and it reads the world position through the instance matrix so that no two of a thousand
+// instances come out the same — which is exactly the trick a per-object texture could never afford.
 //
 // cover entries are [code, ring, hole, ...] with rings as flat decimetres from the tile's north-west corner;
-// codes: 1/2 grass, 3 urban green, 4 arable, 5 orchard, 6 tree nursery, 7 wood, 20 yard.
+// codes: 1/2 grass, 3 urban green, 4 arable, 5 orchard, 6 tree nursery, 7 wood, 20 yard, 30 water.
 const AREA = [
-  // code            prop        per hectare   scale       reach (m)  tilt
-  { codes: [4],      prop: "hay",     n: 0.9,  s: [0.9, 1.4], far: 320, spin: true },
-  { codes: [4],      prop: "cart",    n: 0.08, s: [0.9, 1.1], far: 280, spin: true },
-  { codes: [7],      prop: "bush",    n: 6.0,  s: [0.8, 1.6], far: 300, spin: true },
-  { codes: [7],      prop: "rock",    n: 1.6,  s: [0.5, 1.5], far: 300, spin: true },
-  { codes: [1, 2],   prop: "rock",    n: 0.35, s: [0.5, 1.3], far: 320, spin: true },
-  { codes: [1, 2],   prop: "bush",    n: 0.5,  s: [0.8, 1.3], far: 300, spin: true },
-  { codes: [3],      prop: "planter", n: 1.2,  s: [0.9, 1.2], far: 220, spin: true },
-  { codes: [3],      prop: "bench",   n: 0.8,  s: [1.0, 1.0], far: 220, spin: true },
-  { codes: [3],      prop: "bush",    n: 4.0,  s: [0.7, 1.2], far: 250, spin: true },
-  { codes: [20],     prop: "barrel",  n: 3.0,  s: [0.85, 1.15], far: 200, spin: true },
-  { codes: [20],     prop: "crate",   n: 2.5,  s: [0.8, 1.3], far: 200, spin: true },
-  { codes: [20],     prop: "hay",     n: 1.2,  s: [0.9, 1.2], far: 220, spin: true },
-  { codes: [20],     prop: "planter", n: 1.5,  s: [0.9, 1.2], far: 200, spin: true },
-  { codes: [5, 6],   prop: "crate",   n: 0.8,  s: [0.9, 1.2], far: 220, spin: true },
+  // code            prop          per hectare  scale          reach (m)  tilt
+  { codes: [4],      prop: "hay",      n: 0.9,  s: [0.9, 1.4],  far: 320, spin: true },
+  { codes: [4],      prop: "cart",     n: 0.08, s: [0.9, 1.1],  far: 280, spin: true },
+  { codes: [4],      prop: "molehill", n: 2.0,  s: [0.7, 1.3],  far: 95,  spin: true },
+  { codes: [7],      prop: "bush",     n: 4.0,  s: [0.8, 1.6],  far: 300, spin: true },
+  { codes: [7],      prop: "bramble",  n: 3.2,  s: [0.8, 1.7],  far: 190, spin: true },
+  { codes: [7],      prop: "stump",    n: 0.9,  s: [0.7, 1.6],  far: 170, spin: true },
+  { codes: [7],      prop: "rock",     n: 1.6,  s: [0.5, 1.5],  far: 300, spin: true },
+  { codes: [7],      prop: "logpile",  n: 0.12, s: [0.9, 1.2],  far: 210, spin: true },
+  { codes: [1, 2],   prop: "rock",     n: 0.35, s: [0.5, 1.3],  far: 320, spin: true },
+  { codes: [1, 2],   prop: "bush",     n: 0.4,  s: [0.8, 1.3],  far: 300, spin: true },
+  { codes: [1, 2],   prop: "molehill", n: 4.0,  s: [0.7, 1.4],  far: 95,  spin: true },
+  { codes: [1, 2],   prop: "flowers",  n: 12.0, s: [0.8, 1.5],  far: 115, spin: true },
+  { codes: [3],      prop: "planter",  n: 1.2,  s: [0.9, 1.2],  far: 220, spin: true },
+  { codes: [3],      prop: "bench",    n: 0.8,  s: [1.0, 1.0],  far: 220, spin: true },
+  { codes: [3],      prop: "bush",     n: 3.0,  s: [0.7, 1.2],  far: 250, spin: true },
+  { codes: [3],      prop: "flowers",  n: 6.0,  s: [0.8, 1.3],  far: 115, spin: true },
+  { codes: [20],     prop: "barrel",   n: 3.0,  s: [0.85, 1.15], far: 200, spin: true },
+  { codes: [20],     prop: "crate",    n: 2.5,  s: [0.8, 1.3],  far: 200, spin: true },
+  { codes: [20],     prop: "hay",      n: 1.2,  s: [0.9, 1.2],  far: 220, spin: true },
+  { codes: [20],     prop: "planter",  n: 1.5,  s: [0.9, 1.2],  far: 200, spin: true },
+  { codes: [20],     prop: "logpile",  n: 0.9,  s: [0.9, 1.2],  far: 210, spin: true },
+  { codes: [5, 6],   prop: "crate",    n: 0.8,  s: [0.9, 1.2],  far: 220, spin: true },
+  { codes: [5, 6],   prop: "flowers",  n: 5.0,  s: [0.8, 1.3],  far: 115, spin: true },
 ]
-// Along the boundary of a cover polygon: the hedge banks, fences and field trees that draw the Limburg grid.
+// Along the boundary of a cover polygon: the hedge banks, walls, gates and field trees that draw the Limburg grid.
 // `ring` is the chance that a given boundary gets this treatment at all (not every field is hedged, not every yard
-// fenced), `chance` the chance per step along it, and `min` the shortest edge worth dressing.
+// fenced), `chance` the chance per step along it, `min` the shortest edge worth dressing, and `out` how far inward
+// the piece is pushed so it sits on the boundary rather than over it — negative to sit outside, which is how the
+// reeds end up on the bank of a watercourse instead of in the middle of it.
 const EDGE = [
-  { codes: [1, 2],  prop: "bush",  gap: 2.6,  chance: 0.95, ring: 0.45, min: 14, s: [1.0, 1.7], far: 340, out: 1.0 },   // hedgerow: nearly continuous
-  { codes: [1, 2],  prop: "fence", gap: 3.2,  chance: 0.8,  ring: 0.22, min: 28, s: [1.0, 1.0], far: 260, out: 0.4 },
-  { codes: [4],     prop: "bush",  gap: 6.0,  chance: 0.6,  ring: 0.45, min: 18, s: [1.0, 1.6], far: 340, out: 1.2 },
-  { codes: [4],     prop: "tree",  gap: 26.0, chance: 0.6,  ring: 0.45, min: 30, s: [0.8, 1.4], far: 400, out: 1.5 },   // pollard willows on the field edge
-  { codes: [20],    prop: "fence", gap: 3.0,  chance: 0.8,  ring: 0.3,  min: 16, s: [1.0, 1.0], far: 220, out: 0.3 },
-  { codes: [7],     prop: "bush",  gap: 3.0,  chance: 0.8,  ring: 0.7,  min: 14, s: [1.0, 1.8], far: 320, out: 0.8 },   // woodland fringe
+  { codes: [1, 2],  prop: "hedge",    gap: 1.25, chance: 0.97, ring: 0.42, min: 14, s: [0.95, 1.30], far: 330, out: 0.9 },
+  { codes: [1, 2],  prop: "fence",    gap: 3.2,  chance: 0.80, ring: 0.22, min: 28, s: [1.0, 1.0],   far: 260, out: 0.4 },
+  { codes: [1, 2],  prop: "drystone", gap: 1.85, chance: 0.95, ring: 0.10, min: 26, s: [0.95, 1.15], far: 250, out: 0.5 },
+  { codes: [1, 2],  prop: "gate",     gap: 95,   chance: 0.55, ring: 0.35, min: 44, s: [0.95, 1.10], far: 210, out: 0.9 },
+  { codes: [4],     prop: "hedge",    gap: 1.45, chance: 0.72, ring: 0.40, min: 18, s: [1.0, 1.40],  far: 330, out: 1.2 },
+  { codes: [4],     prop: "pollard",  gap: 23.0, chance: 0.65, ring: 0.45, min: 30, s: [6.0, 9.5],   far: 340, out: 1.5, spin: true },
+  { codes: [20],    prop: "fence",    gap: 3.0,  chance: 0.80, ring: 0.30, min: 16, s: [1.0, 1.0],   far: 220, out: 0.3 },
+  { codes: [20],    prop: "gate",     gap: 70,   chance: 0.60, ring: 0.40, min: 22, s: [0.95, 1.10], far: 210, out: 0.4 },
+  { codes: [7],     prop: "hedge",    gap: 1.50, chance: 0.85, ring: 0.65, min: 14, s: [1.10, 1.65], far: 320, out: 0.8 },
+  { codes: [7],     prop: "bramble",  gap: 3.4,  chance: 0.60, ring: 0.50, min: 14, s: [0.9, 1.5],   far: 200, out: 1.6 },
+  { codes: [30],    prop: "reed",     gap: 1.3,  chance: 0.85, ring: 0.80, min: 8,  s: [0.7, 1.3],   far: 190, out: -0.9, water: true, spin: true },
 ]
+// how many of a prop may stand at once; the nearest survive when a landscape asks for more
 const MAX_PER_PROP = 800
+const CAP = { hedge: 2200, reed: 900, flowers: 700, molehill: 520, drystone: 900, bramble: 500, pollard: 220 }
+const WATER_CODE = 30
 
-// ---- the boulders: a squashed icosahedron pushed about by noise, flat shaded ---------------------------------------
+// ---- the boulders: a squashed icosahedron pushed about by noise, mottled per face, flat shaded ------------------
 const rockGeos = Array.from({ length: 3 }, (_, v) => {
-  const g = new THREE.IcosahedronGeometry(0.5, 1).toNonIndexed()
+  const g = new THREE.IcosahedronGeometry(0.5, 1)   // polyhedra come non-indexed already
   const p = g.attributes.position
+  const col = new Float32Array(p.count * 3)
+  const tint = new THREE.Color()
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i)
     const n = 0.72 + 0.42 * hash(Math.round(x * 37 + y * 11 + z * 23 + v * 131) * 0.5)
     p.setXYZ(i, x * n * 1.25, y * n * 0.72, z * n * 1.1)
+    // grey shot through with a little ochre and a little green, so no two faces are the same stone
+    const k = hash(Math.floor(i / 3) * 7.3 + v * 11.1)
+    tint.setRGB(0.52 + k * 0.20, 0.51 + k * 0.19, 0.47 + k * 0.15)
+    col[i * 3] = tint.r; col[i * 3 + 1] = tint.g; col[i * 3 + 2] = tint.b
   }
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3))
   g.computeVertexNormals()
   g.__shared = true
   return g
 })
-const rockMat = new THREE.MeshStandardMaterial({ color: 0x8d8a83, roughness: 0.95, flatShading: true })
-rockMat.__shared = true
+
+// Dirt, damp and the slow drift of tone that keeps a thousand copies of one model from looking like a thousand
+// copies of one model. The world position is read through the instance matrix, which is the whole point: read it off
+// the model matrix instead and every instance of the pool gets the same patch of noise.
+export function weatherProp(m) {
+  if (!m || m.userData.__weathered) return m
+  m.userData.__weathered = true
+  // these may be three's own prototype methods, which read `this`: bind before wrapping
+  const prev = m.onBeforeCompile.bind(m)
+  const prevKey = m.customProgramCacheKey.bind(m)
+  m.onBeforeCompile = (shader) => {
+    prev(shader)
+    shader.uniforms.uNoise = { value: noiseTexture() }
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vPropW;\nvarying float vPropY;")
+      .replace("#include <begin_vertex>", `#include <begin_vertex>
+\t{
+\t\t#ifdef USE_INSTANCING
+\t\tvPropW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+\t\t#else
+\t\tvPropW = (modelMatrix * vec4(transformed, 1.0)).xyz;
+\t\t#endif
+\t\tvPropY = transformed.y;
+\t}`)
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform sampler2D uNoise;\nvarying vec3 vPropW;\nvarying float vPropY;\nfloat propGrain;")
+      .replace("#include <map_fragment>", `#include <map_fragment>
+\t{
+\t\tfloat macro = texture2D(uNoise, vPropW.xz * 0.0031).r;
+\t\tpropGrain = texture2D(uNoise, vPropW.xz * 0.75 + vPropW.y * 0.21).r;
+\t\tdiffuseColor.rgb *= (0.80 + 0.36 * macro) * (0.88 + 0.24 * propGrain);
+\t\tfloat foot = 1.0 - smoothstep(0.0, 0.55, vPropY);
+\t\tdiffuseColor.rgb *= mix(1.0, 0.66, foot * 0.85);
+\t\tdiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.19, 0.26, 0.10), foot * smoothstep(0.60, 0.86, propGrain) * 0.55);
+\t}`)
+      .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\n\troughnessFactor = clamp(roughnessFactor + 0.22 - 0.34 * propGrain, 0.12, 1.0);")
+  }
+  m.customProgramCacheKey = () => `${prevKey()}|prop-weathered`
+  m.needsUpdate = true
+  return m
+}
 
 export class Scatter {
   constructor({ scene, assets, heightAt }) {
     this.scene = scene; this.assets = assets; this.heightAt = heightAt
-    this.plans = new Map()       // tile key → { prop → [x, y, z, yaw, scale, ...] }
-    this.pools = new Map()       // prop → [{ mesh }]
+    this.plans = new Map()       // tile key → { prop → [x, y, z, yaw, scale, far] }
+    this.pools = new Map()       // prop → { capacity, meshes }
     this.ready = new Map()       // prop → [{ geometry, material }] once baked
     this.signature = ""
     for (const prop of new Set([...AREA, ...EDGE].map((r) => r.prop))) this.prepare(prop)
   }
 
   prepare(prop) {
-    if (prop === "rock") { this.ready.set(prop, rockGeos.map((geometry) => ({ geometry, material: rockMat }))); return }
-    this.assets.instanced(prop).then((groups) => { if (groups.length) { this.ready.set(prop, groups); this.signature = "" } })
+    if (prop === "rock") { this.ready.set(prop, rockGeos.map((geometry) => ({ geometry, material: weatherProp(kitStoneMaterial()) }))); return }
+    if (KIT.includes(prop)) { this.ready.set(prop, kitPiece(prop)); return }
+    this.assets.instanced(prop).then((groups) => {
+      if (!groups.length) return
+      for (const g of groups) weatherProp(g.material)
+      this.ready.set(prop, groups)
+      this.signature = ""
+    })
   }
 
   // tiles: ChunkManager's map; (px, pz): the player, who decides what is close enough to draw
@@ -102,11 +182,12 @@ export class Scatter {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0)
     for (const [prop, groups] of this.ready) {
       let list = want.get(prop) ?? []
-      if (list.length / 6 > MAX_PER_PROP) {                               // too many: keep the nearest
+      const cap = CAP[prop] ?? MAX_PER_PROP
+      if (list.length / 6 > cap) {                                        // too many: keep the nearest
         const rows = []
         for (let i = 0; i < list.length; i += 6) rows.push(list.slice(i, i + 6))
         rows.sort((a, b) => a[5] - b[5])
-        list = rows.slice(0, MAX_PER_PROP).flat()
+        list = rows.slice(0, cap).flat()
       }
       const count = list.length / 6
       let pool = this.pools.get(prop)
@@ -129,7 +210,7 @@ export class Scatter {
         m.compose(p.set(list[b], list[b + 1], list[b + 2]), q, s.setScalar(list[b + 4]))
         for (const mesh of pool.meshes) mesh.setMatrixAt(i, m)
       }
-      for (const mesh of pool.meshes) { mesh.count = count; mesh.instanceMatrix.needsUpdate = true }
+      for (const mesh of pool.meshes) { mesh.count = count; mesh.instanceMatrix.needsUpdate = true; mesh.visible = count > 0 }
     }
   }
 
@@ -145,7 +226,6 @@ export class Scatter {
     const [ox, oz] = t.terrain ? [t.terrain.ox, t.terrain.oz] : [0, 0]
     for (const entry of t.cover ?? []) {
       const code = entry[0]
-      if (code === 30) continue                                              // water
       const first = Array.isArray(entry[1]) ? 1 : 2                          // water entries carry a level; others do not
       const rings = []
       for (let r = first; r < entry.length; r++) {
@@ -156,8 +236,13 @@ export class Scatter {
         rings.push(ring)
       }
       if (!rings.length) continue
-      for (const rule of AREA) if (rule.codes.includes(code)) this.area(rule, rings, add, free)
-      for (const rule of EDGE) if (rule.codes.includes(code)) this.edge(rule, rings, add, free)
+      // nothing stands on open water; only the boundary rules that ask for it dress a watercourse, from the bank
+      if (code !== WATER_CODE) for (const rule of AREA) if (rule.codes.includes(code)) this.area(rule, rings, add, free)
+      for (const rule of EDGE) {
+        if (!rule.codes.includes(code)) continue
+        if (code === WATER_CODE && !rule.water) continue
+        this.edge(rule, rings, add, free)
+      }
     }
     this.plans.set(t.key, plan)
   }
@@ -205,7 +290,7 @@ export class Scatter {
           if (h1 > rule.chance) continue
           const px = ax + dx * t + nx * rule.out, pz = az + dz * t + nz * rule.out
           if (!free(px, pz, 2.5)) continue
-          const yaw = Math.atan2(ux, uz) + (h2 - 0.5) * 0.3                  // aligned with the boundary
+          const yaw = rule.spin ? h1 * Math.PI * 2 : Math.atan2(ux, uz) + (h2 - 0.5) * 0.3   // aligned with the boundary
           add(rule.prop, px, pz, yaw, rule.s[0] + h2 * (rule.s[1] - rule.s[0]), rule.far)
         }
         carry = (carry - len) % rule.gap

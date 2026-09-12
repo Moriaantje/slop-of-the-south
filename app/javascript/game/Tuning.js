@@ -83,20 +83,38 @@ export const TUNING = {
     height: 4.2,           // metres, also the model's normalised height (Assets.MODELS.mech)
     drownDepth: 1.5, drownTime: 3,   // water deeper than this for this long: "Verzopen"
   },
-  transform: { time: 1.2, swapAt: 0.5, cooldown: 2 },
+  transform: {
+    time: 1.2, swapAt: 0.5, cooldown: 2,
+    unfoldDamp: 4.2,       // /unit: how fast the unfold spring settles
+    unfoldFreq: 4.6,       // the spring's frequency: the overshoot you see as the panels lock
+    shake: 0.34,           // camera shake at the swap
+  },
   spells: {
     fireball:  { mana: 0.2, speed: 60, r: 6, dmg: 80, cd: 0.6, life: 3 },
     lightning: { mana: 0.35, range: 200, ahead: 60, r: 3, dmg: 30, cd: 1.5 },
     aimCone: 0.44, aimRange: 300,    // auto-aim: a dragon within this angle and range is the target
   },
+  // the landscape's own dials: the vegetation LOD distances and the road surface (Trees.js, Grass.js, Roads.js)
+  veg: {
+    lodNear: 105,          // m: full tree geometry inside this, a cross of painted cards beyond
+    lodDrop: 1300,         // m: nothing at all beyond this — it covers the loaded tiles, since the fog starts at 900
+  },
+  road: {
+    crown: 0.022, crownMax: 0.06,   // camber: the fall per metre across the carriageway, and its cap
+  },
   look: {
     exposure: 0.95,        // tone mapping exposure by day (the night adds up to +35 %)
-    sun: 1.7,              // the sun's intensity at noon: strong enough that lit and shadowed sides differ
+    sun: 2.4,              // the sun's intensity at noon. The hemisphere fill dropped to 0.27 to buy shadow
+                           // contrast, so the key has to come up: the ratio lands near 5:1 instead of 2:1.
+    skyGain: 0.33,         // the scattering sky's output, scaled into the same linear range as the lit ground
+    skyShoulder: 1.2,      // the Reinhard shoulder above it: what stops the sky tripping the bloom threshold
     envIntensity: 0.35,    // how much the sky environment map lights standard materials
     hemi: 0.5,             // hemisphere light scale once the environment map supplies ambient (1 without it)
     orthoSat: 1.1, orthoGain: 0.9,   // saturation and gain of the aerial photo on the terrain
     detail: 0.9, detailFar: 260,     // the close-range ground grain: strength, and the distance it has faded out by
     windows: { lit: 0.35, glow: 1.4 }, // share of windows lit at night, and how bright
+    buildings: { reveal: 0.13, chamfer: 0.14, plinth: 0.55 },   // m: how deep the glass sits behind the wall, how much corner the chamfer takes, how high the base course
+    wind: 0.35,            // 0 still, 1 a fresh breeze: drives the sway of every tree, hedge and tuft
     shadows: { size: 2048, radius: 170 },   // the sun's shadow map: texels, and metres around the player it covers
     post: { ao: 0.9, bloom: 0.28, bloomThreshold: 0.85, contrast: 1.08, saturation: 1.12, warm: 0.06, vignette: 0.28, sharpen: 0.6, grain: 0.018 },   // Post.js
     shafts: 0.25,          // sun shafts through the fog when you look towards the sun

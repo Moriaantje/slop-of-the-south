@@ -1,6 +1,7 @@
 import * as THREE from "three"
 import { TUNING as T, expDamp } from "game/Tuning"
 import { ShieldBubble } from "game/ShieldBubble"
+import { MechRig, WizardKit } from "game/MechRig"
 
 // The wizard mech: the same contract as Vehicle (x, y, z, yaw, speed, vx, vz, spec, mesh, integrate, settle, state,
 // reset, setNight, addBoost, kick, jump, boostMeter) so the camera, Combat, the HUD and the network treat it like
@@ -8,6 +9,16 @@ import { ShieldBubble } from "game/ShieldBubble"
 // (hold Space after the apex, burning mana), raises a shield (Shift, burning mana, slower). Mana is the boost meter,
 // so the road pads refill it and the HUD bar is the same bar in blue. Spells live in Spells.js. Water it wades
 // through slowly; deeper than the knee for three seconds and it is "verzopen" (game.js resets it to the hub).
+//
+// What it looks like is two bodies and one wardrobe. MechRig is a walking biped built from geometry, which is what
+// stands here while the CC0 glTF robot is loading and forever if the file never turns up; the old fallback was a
+// grey box, which is exactly the kind of placeholder the whole art pass exists to get rid of. When the glTF does
+// arrive it takes over — it has a rig and real animation clips, which beats anything hand-posed — but it ships with
+// a flat unlit palette texture, so it is relit on the way in: metal enough to pick up the sky environment map, with
+// its own texture fed back as a faint emissive so the panel colours still read after dark. Either way the wizard's
+// kit (cloak, floating staff, mana core) hangs off the same inner group, and that is what sells it as a sorcerer
+// rather than a robot. The inner group also carries the transformation fold, so Avatar can pose the machine without
+// fighting the root transform that settle() writes every frame.
 export const MECH_SPEC = {
   id: "mech", naam: "Tovenaarsmech", blurb: "Loopt overal, springt en zweeft, gooit vuurballen en bliksem. Mana is de boostmeter.",
   length: 2.6, track: 2.2, ram: 0.6, clear: 4, push: true, pushMin: 0.5, pushKinds: ["t", "l", "g", "s"],   // tramples trees and posts, bounces off houses
@@ -15,6 +26,14 @@ export const MECH_SPEC = {
   ability: { kind: "none", cooldown: 0, hint: "Q vuurbal · F bliksem · shift schild · spatie spring/zweef · T terug in de auto" },
 }
 const WALK_CLIPS = [/run/i, /walk/i], IDLE_CLIPS = [/idle/i], AIR_CLIPS = [/jump/i, /fall/i, /fly/i, /hover/i]
+const FOLD_SINK = 0.80           // metres the folded machine lifts off the ground before the flash
+const FOLD_CROUCH = 0.42         // share of its height the body loses as it folds
+const FOLD_NARROW = 0.12         // share of its width
+const FOLD_LEAN = 0.35           // rad the body tips forward over the tucked legs
+const GLTF_METAL = 0.55          // the palette-textured robot needs metal to catch the sky map at all
+const GLTF_ROUGH = 0.42
+const GLTF_GLOW = 0.22           // its own texture fed back as emissive, so it does not go black at night
+const NIGHT_GLOW = 1.6           // extra mana-core emissive in the dark, where the mech is the only light source
 
 export class Mech {
   constructor(spawn, { assets = null, heightAt = null, waterAt = null } = {}) {
@@ -24,15 +43,44 @@ export class Mech {
     this.maxSpeed = T.mech.walk
     this.mesh = new THREE.Group()
     this.mesh.userData = { wheels: [], flames: [], lights: null }
-    this.inst = assets?.instantiate("mech") ?? null
-    if (this.inst) this.mesh.add(this.inst.root)
-    else { const box = new THREE.Mesh(new THREE.BoxGeometry(1.6, T.mech.height, 2.4), new THREE.MeshStandardMaterial({ color: 0x4e5a6e })); box.position.y = T.mech.height / 2; this.mesh.add(box) }
+    this.body = new THREE.Group()                   // everything the fold poses; the root stays the game's to move
+    this.mesh.add(this.body)
+    this.rig = new MechRig()
+    this.body.add(this.rig.root)
+    this.kit = new WizardKit({ cloak: true, core: true, mats: this.rig.mats })
+    this.kit.core.visible = false                   // the rig has a core of its own; this one is for the glTF body
+    this.body.add(this.kit.root)
+    this.inst = assets?.instantiate("mech", { onReady: (i) => this.adopt(i) }) ?? null
+    // Assets hands back a stand-in box until the file lands: keep it hidden, the rig is a far better placeholder
+    if (this.inst) { this.inst.root.visible = false; this.body.add(this.inst.root) }
     this.bubble = new ShieldBubble(this.mesh, 3.2, T.mech.height * 0.55)
     this.mana = 0.5                                 // survives resets, like the car's meter
     this.darkness = 0
     this.boostPower = 0; this.drifting = false; this.driftMild = false; this.chargeLevel = 0; this.braking = false; this.smoking = false
     this.t = 0
+    this.mesh.userData.fold = (k) => this.fold(k)
     this.reset(spawn)
+  }
+
+  // The glTF landed: hand the body over to it and relight it. The stand-in box Assets hands back before the file
+  // arrives is not wanted here either — the rig is a better placeholder than any box — so it is dropped as well.
+  adopt(inst) {
+    if (!inst.clips.length) return                  // no clips means Assets fell back to its own box: keep the rig
+    inst.root.visible = true
+    this.rig.root.visible = false
+    this.kit.core.visible = true
+    inst.root.traverse((o) => {
+      if (!o.isMesh) return
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (!m || m.__mechLit) continue
+        m.__mechLit = true
+        m.metalness = GLTF_METAL
+        m.roughness = GLTF_ROUGH
+        m.envMapIntensity = 1.25
+        if (m.map) { m.emissiveMap = m.map; m.emissive = new THREE.Color(0xffffff); m.emissiveIntensity = GLTF_GLOW }
+        m.needsUpdate = true
+      }
+    })
   }
 
   get boostMeter() { return this.mana }
@@ -115,19 +163,34 @@ export class Mech {
     this.animate()
   }
 
+  // The glTF's mixer when there is one, the rig's own gait when there is not, and the wizard's kit either way. The
+  // mana core brightens in the dark: at night the mech is often the only light in the street and its own glow is
+  // what keeps its silhouette readable.
   animate() {
-    const inst = this.inst
-    if (!inst?.ready || !inst.clips.length) { this.bob(); return }
-    const moving = Math.abs(this.speed) > 0.5
-    const want = this.vy !== null ? AIR_CLIPS : moving ? WALK_CLIPS : IDLE_CLIPS
-    for (const re of want) if (inst.play(re, { timeScale: moving && this.vy === null ? Math.max(0.6, Math.abs(this.speed) / 6) : 1 })) break
-    inst.update(this._dt)
+    const inst = this.inst, air = this.vy !== null
+    const glTF = inst?.ready && inst.clips.length
+    if (glTF) {
+      const moving = Math.abs(this.speed) > 0.5
+      const want = air ? AIR_CLIPS : moving ? WALK_CLIPS : IDLE_CLIPS
+      for (const re of want) if (inst.play(re, { timeScale: moving && !air ? Math.max(0.6, Math.abs(this.speed) / 6) : 1 })) break
+      inst.update(this._dt)
+    } else {
+      this.rig.update(this._dt, this.t, this.speed, air)
+      this.rig.setMana(this.mana, this.t)
+    }
+    this.kit.update(this._dt, this.t, this.speed, this.mana, air)
+    const glow = 1 + NIGHT_GLOW * this.darkness
+    this.rig.mats.rune.emissiveIntensity *= glow
   }
 
-  // the stand-in box: a walking bob
-  bob() {
-    const body = this.mesh.children[0]
-    if (body?.isMesh) body.position.y = T.mech.height / 2 + (Math.abs(this.speed) > 0.5 ? Math.abs(Math.sin(this.t * 8)) * 0.25 : 0)
+  // k = 0 is standing, k = 1 the folded machine: legs tucked under a crouched body that has lifted clear of the
+  // ground, the cloak drawn in and the staff pulled against the flank. Avatar supplies the easing.
+  fold(k) {
+    this.body.scale.set(1 - FOLD_NARROW * k, 1 - FOLD_CROUCH * k, 1 - FOLD_NARROW * k)
+    this.body.position.y = FOLD_SINK * k
+    this.body.rotation.x = FOLD_LEAN * k
+    this.rig.fold(k)
+    this.kit.fold(k)
   }
 
   state() {

@@ -1,22 +1,41 @@
-import { TUNING as T } from "game/Tuning"
+import { TUNING as T, smoothstep } from "game/Tuning"
 import { Vehicle } from "game/Vehicle"
 import { Mech } from "game/Mech"
+import { TransformFx } from "game/TransformFx"
 
 // The player: a car (Vehicle) and a wizard mech (Mech), one of them active, with the transformation between them.
 // Everything that used to talk to `car` talks to this: the properties of the active body are forwarded, so the
 // camera, Combat, the HUD and the network code are none the wiser. T starts the morph (grounded, not drifting,
-// 2 s cooldown): the old body squashes and spins for half a second, a puff, and the new one unfolds in its place.
-// `onMode(mode, body)` fires at the swap so game.js can tell the server (`switch`) and restyle the HUD.
+// 2 s cooldown). `onMode(mode, body)` fires at the swap so game.js can tell the server (`switch`) and restyle the HUD.
+//
+// The transformation used to spin the old body a full turn while squashing it flat and then spin the new one back,
+// which read as a cheap sprite trick rather than as a machine changing shape. It is now a fold. Each body owns a
+// `userData.fold(k)` that poses it between driving (k = 0) and a compact block (k = 1) — the car tucks its wheels
+// inboard and up under its arches, narrows, squeezes along its length and rears onto its tail; the mech crouches,
+// draws its legs under itself, folds its arms across the core and pulls the cloak in. The first half of the beat
+// runs that fold in on a smoothstep while a glow gathers; at the swap the bodies are exchanged inside a flash, a
+// ground shockwave and a column of light, which is what hides the exchange; the second half runs the new body's
+// fold out on a damped spring whose tail crosses zero, so the machine over-extends a little and settles back rather
+// than arriving at its pose and stopping dead. The timing contract is untouched: TUNING.transform.swapAt is when
+// the bodies swap, TUNING.transform.time is when the whole thing is over and both scales are exactly one again.
+const UNFOLD_DAMP = 4.2        // /unit: how fast the unfold spring loses its energy
+const UNFOLD_FREQ = 4.6        // rad over the unfold: crosses zero around two thirds through, then rings once
+const SHAKE = 0.34             // camera shake at the swap, when an Effects is wired in
+const COLOUR = { mech: 0x7fd2ff, car: 0xffb257 }   // cold arcane going in, warm combustion coming back out
+
 export class Avatar {
-  constructor({ spawn, spec, scene, assets = null, heightAt = null, waterAt = null, onMode = null }) {
+  constructor({ spawn, spec, scene, assets = null, heightAt = null, waterAt = null, onMode = null, effects = null }) {
     this.scene = scene
     this.onMode = onMode
+    this.effects = effects
     this.car = new Vehicle(spawn, spec)
     this.mech = new Mech(spawn, { assets, heightAt, waterAt })
     this.mode = "car"
     this.active = this.car
     this.morph = null
     this.cooldown = 0
+    this.fx = new TransformFx(scene)
+    this._dt = 1 / 60
     for (const m of [this.car.mesh, this.mech.mesh]) m.traverse((o) => { if (o.isMesh && !o.isSprite) o.castShadow = true })
     scene.add(this.car.mesh)
   }
@@ -57,6 +76,7 @@ export class Avatar {
 
   // ---- transformation -------------------------------------------------------------------------------------------
   integrate(dt, input) {
+    this._dt = dt
     this.cooldown = Math.max(0, this.cooldown - dt)
     if (this.morph) return this.stepMorph(dt)
     if (input.transform && this.active.vy === null && this.cooldown <= 0 && !this.car.drifting) { input.clearPressed?.(); this.begin(this.mode === "car" ? "mech" : "car"); return }
@@ -66,12 +86,13 @@ export class Avatar {
   settle(heightAt) {
     this.active.settle(heightAt)
     if (this.morph) this.morphVisual()
+    this.fx.update(this._dt)
   }
 
   begin(mode) {
     const from = this.active, to = mode === "mech" ? this.mech : this.car
     this.carry(from, to)
-    this.morph = { t: 0, from, to, mode, swapped: false }
+    this.morph = { t: 0, from, to, mode, swapped: false, colour: COLOUR[mode] }
   }
 
   // instant, without the show: the server says which body you were in, or the picker chose a car while in the mech
@@ -81,6 +102,8 @@ export class Avatar {
     const from = this.active, to = mode === "mech" ? this.mech : this.car
     this.carry(from, to)
     this.swap(to, mode)
+    from.mesh.userData.fold?.(0)
+    to.mesh.userData.fold?.(0)
   }
 
   carry(from, to) {
@@ -102,29 +125,36 @@ export class Avatar {
   stepMorph(dt) {
     const R = T.transform, m = this.morph
     m.t += dt
-    if (!m.swapped && m.t >= R.swapAt) { m.swapped = true; this.swap(m.to, m.mode) }
+    if (!m.swapped && m.t >= R.swapAt) {
+      m.swapped = true
+      const x = m.from.x, y = m.from.y, z = m.from.z
+      this.swap(m.to, m.mode)
+      this.fx.burst(x, y, z, m.colour)
+      this.effects?.shake?.(SHAKE)
+    }
     if (m.t >= R.time) this.finishMorph()
   }
 
-  // squash and spin the old body, then unfold the new one (after settle, which places the meshes)
+  // fold the old body in, then let the new one spring out and settle (after settle, which places the meshes)
   morphVisual() {
     const R = T.transform, m = this.morph
     if (!m.swapped) {
-      const k = Math.min(1, m.t / R.swapAt)
-      m.from.mesh.scale.set(1 + 0.3 * k, 1 - 0.8 * k, 1 + 0.3 * k)
-      m.from.mesh.rotation.y = m.from.yaw + k * Math.PI * 2
+      const k = smoothstep(0, 1, Math.min(1, m.t / R.swapAt))
+      m.from.mesh.userData.fold?.(k)
+      this.fx.charge(m.from.x, m.from.mesh.position.y, m.from.z, k, m.colour)
     } else {
-      const k = Math.min(1, (m.t - R.swapAt) / (R.time - R.swapAt)), s = 0.2 + 0.8 * k
-      m.to.mesh.scale.set(s, s, s)
-      m.to.mesh.rotation.y = m.to.yaw + (1 - k) * Math.PI * 2
+      const u = Math.min(1, (m.t - R.swapAt) / (R.time - R.swapAt))
+      m.to.mesh.userData.fold?.(Math.exp(-UNFOLD_DAMP * u) * Math.cos(UNFOLD_FREQ * u))
     }
   }
 
   finishMorph() {
     const m = this.morph
     if (!m) return
+    this.fx?.clear?.()                          // an interrupted fold never reaches burst(), which would clear it
     if (!m.swapped) this.swap(m.to, m.mode)
     m.to.mesh.scale.set(1, 1, 1); m.from.mesh.scale.set(1, 1, 1)
+    m.to.mesh.userData.fold?.(0); m.from.mesh.userData.fold?.(0)
     this.morph = null
     this.cooldown = T.transform.cooldown
   }

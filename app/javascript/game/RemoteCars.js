@@ -3,6 +3,7 @@ import { makeVehicleMesh } from "game/Vehicles"
 import { makeBeacon, placeBeacon, disposeBeacon } from "game/Beacon"
 import { Blob } from "game/Shadows"
 import { ShieldBubble } from "game/ShieldBubble"
+import { WizardKit } from "game/MechRig"
 import { TUNING as T2 } from "game/Tuning"
 import { VehicleFx } from "game/VehicleFx"
 import { TUNING as T, lerpAngle, wrapAngle } from "game/Tuning"
@@ -58,6 +59,9 @@ export class RemoteCars {
         car.mesh.userData = { wheels: [], flames: [], lights: null }
         car.inst = this.assets?.instantiate("mech") ?? null
         if (car.inst) car.mesh.add(car.inst.root)
+        // the cloak and staff the player's own mech wears, so another player's reads as the same machine
+        car.kit = new WizardKit({ cloak: true, core: true, scale: T2.mech.height / 4.2 })
+        car.mesh.add(car.kit.root)
         car.bubble = new ShieldBubble(car.mesh, 3.2, T2.mech.height * 0.55)
         car.shadow.size(2.2, 2.2)
       } else {
@@ -106,6 +110,7 @@ export class RemoteCars {
         car.inst.update(dt)
       }
       car.bubble?.update(car.shield, dt, now / 1000)
+      car.kit?.update(dt, now / 1000, Math.abs(speed), 0.6, false)     // the cloak swings and the staff stone pulses
       if (local && camera) placeBeacon(car.beacon, x, y, z, car.name, local, camera)
       if (car.shadow) { const g = this.heightAt ? this.heightAt(x, z) : y; car.shadow.place(x, g, z, yaw, y - g, this.darkness) }
     }
@@ -119,7 +124,7 @@ export class RemoteCars {
     this.scene.remove(car.mesh)
     disposeBeacon(car.beacon)
     car.shadow?.dispose()
-    car.inst?.dispose(); car.bubble?.dispose()
+    car.inst?.dispose(); car.bubble?.dispose(); car.kit?.dispose?.()
     this.cars.delete(id)
   }
 }

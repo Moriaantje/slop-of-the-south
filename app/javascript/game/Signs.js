@@ -7,11 +7,26 @@ import { pointKey, foldable } from "game/Destructibles"
 // Tile entries: [x, z, face, code, black?, text?] with face the compass direction the sign face points to. Signs at the
 // same spot share a pole and hang below each other (main sign at 2.3 m, onderborden beneath). With `reg` every pole
 // registers one destructible handle carrying the keys of all its signs; knocking it down collapses every part.
+//
+// A sign is not a picture on a rectangle: it is a stamped aluminium plate with a shape, a few millimetres of edge and
+// a galvanised back, hung off a bracket on a tapered pole. Painting a round sign onto a quad left four black corners
+// where the canvas was transparent and an opaque material ignored it, which is most of why the signs read as decals.
+// Each look now carries the outline it was drawn inside — disc, triangle, diamond, octagon or plate — and the plate is
+// built from that outline with a real edge band, so the silhouette against the sky is the silhouette of the sign. The
+// face is drawn at twice the resolution it used to be (the drawing code still works in the old 128-unit space; the
+// context is simply scaled), because a speed limit you cannot read at thirty metres may as well not be there.
 const RED = "#c8102e", BLUE = "#0d4f9e", WHITE = "#f4f4f0", YELLOW = "#f7c600", BLACK = "#111111", GREY = "#8c8c8c", GREEN = "#1a8a3a"
 const FONT = "Arial, Helvetica, sans-serif"
+const SCALE = 2                // canvas pixels per unit of the drawing space below
+const PLATE = 0.022            // metres: how thick a sign plate is
+const STAND_OFF = 0.075        // metres the plate hangs in front of the pole's centre
 
-const poleMat = Object.assign(new THREE.MeshStandardMaterial({ color: 0x9a9a98, roughness: 0.6, metalness: 0.3 }), { __shared: true })
-const backMat = Object.assign(new THREE.MeshStandardMaterial({ color: 0x7d7f80, roughness: 0.7, metalness: 0.4 }), { __shared: true })
+const poleMat = Object.assign(new THREE.MeshStandardMaterial({ color: 0xa3a5a4, roughness: 0.42, metalness: 0.55 }), { __shared: true })
+// The painted faces are alpha-tested so a triangle or an octagon has the right silhouette, but the paint never quite
+// reaches the plate's outline (a rounded rectangle leaves a margin, a stroked octagon leaves its corners). Making the
+// back plate double-sided turns every discarded rim into the galvanised edge of the plate seen from behind, instead
+// of a hole straight through the sign.
+const backMat = Object.assign(new THREE.MeshStandardMaterial({ color: 0x83868a, roughness: 0.55, metalness: 0.5, side: THREE.DoubleSide }), { __shared: true })
 const materials = new Map()
 
 export function buildSigns(signs, heightAt, reg) {
@@ -38,17 +53,27 @@ export function buildSigns(signs, heightAt, reg) {
       const { w, h } = look
       if (top === null) top = y + h / 2
       else y -= h / 2
-      const face = new THREE.PlaneGeometry(w, h)
-      face.rotateY(rotY); face.translate(pole.x + nx * 0.05, base + y, pole.z + nz * 0.05)
-      parts.push(add(material(look), face))
-      const back = new THREE.PlaneGeometry(w, h)
-      back.rotateY(rotY + Math.PI); back.translate(pole.x + nx * 0.03, base + y, pole.z + nz * 0.03)
-      parts.push(add(backMat, back))
+      const ring = outline(look.shape, w, h)
+      const front = plateFace(ring, PLATE / 2)
+      front.rotateY(rotY); front.translate(pole.x + nx * STAND_OFF, base + y, pole.z + nz * STAND_OFF)
+      parts.push(add(material(look), front))
+      const shell = plateShell(ring, PLATE / 2)                   // the back face and the edge band, in one geometry
+      shell.rotateY(rotY); shell.translate(pole.x + nx * STAND_OFF, base + y, pole.z + nz * STAND_OFF)
+      parts.push(add(backMat, shell))
+      const clamp = new THREE.BoxGeometry(0.085, 0.085, STAND_OFF)   // the bracket that holds it off the pole
+      clamp.rotateY(rotY); clamp.translate(pole.x + nx * STAND_OFF / 2, base + y, pole.z + nz * STAND_OFF / 2)
+      const clampFlat = clamp.toNonIndexed(); clamp.dispose()
+      parts.push(add(backMat, clampFlat))
       y -= h / 2 + 0.06
     }
     if (top === null) continue
-    const pg = new THREE.CylinderGeometry(0.035, 0.04, top, 6)
-    pg.translate(pole.x, base + top / 2, pole.z)
+    const shaft = new THREE.CylinderGeometry(0.030, 0.042, top, 8)
+    shaft.translate(pole.x, base + top / 2, pole.z)
+    const foot = new THREE.CylinderGeometry(0.055, 0.07, 0.12, 8)
+    foot.translate(pole.x, base + 0.06, pole.z)
+    const cap = new THREE.SphereGeometry(0.031, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2)
+    cap.translate(pole.x, base + top, pole.z)
+    const pg = mergeGeometries([shaft, foot, cap].map((g) => { const n = g.toNonIndexed(); g.dispose(); return n }), false)
     parts.push(add(poleMat, pg))
     handles.push({ pole, parts })
   }
@@ -78,8 +103,12 @@ export function setSignsNight(d) { for (const m of materials.values()) m.emissiv
 function material(look) {
   if (materials.has(look.key)) return materials.get(look.key)
   const tex = new THREE.CanvasTexture(look.canvas)
-  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4
-  const mat = Object.assign(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, metalness: 0.05, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0 }), { __shared: true })   // opaque canvases: keep them out of the sorted transparent pass
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8
+  // Alpha-tested rather than transparent: the plate stays in the opaque pass (no sorting, no blending) and the sliver
+  // of canvas outside the painted shape is discarded instead of rendering black. alphaToCoverage resolves the cut
+  // against the multisampled buffer, so the rim of a disc is smooth.
+  const mat = Object.assign(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.42, metalness: 0.05, alphaTest: 0.45, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0 }), { __shared: true })
+  mat.alphaToCoverage = true
   materials.set(look.key, mat)
   return mat
 }
@@ -99,21 +128,27 @@ function lookOf(code, black, text) {
 
 function paint(code, black, text) {
   const wide = /^(H|K|OB)/.test(code) || (/^A[1-3]/.test(code) && /zone/.test(black)) || /^E1[0-3]|^E9/.test(code)
-  const c = document.createElement("canvas"); c.width = wide ? 256 : 128; c.height = 128
+  // The whole catalogue below is written in a 128-unit square (256 for a wide plate). Scaling the context instead of
+  // rewriting three hundred coordinates buys the resolution for nothing.
+  const W = wide ? 256 : 128, H = 128
+  const c = document.createElement("canvas"); c.width = W * SCALE; c.height = H * SCALE
   const ctx = c.getContext("2d")
-  const W = c.width, H = c.height, cx = W / 2, cy = H / 2
+  ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0)
+  const cx = W / 2, cy = H / 2
   const g = glyphs(ctx)
+  let shape = "rect"                       // which outline the plate is cut to; the drawing helpers below set it
   // shapes
-  const disc = (fill, ring, rw = 12) => { ctx.beginPath(); ctx.arc(cx, cy, 60, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill(); if (ring) { ctx.lineWidth = rw; ctx.strokeStyle = ring; ctx.beginPath(); ctx.arc(cx, cy, 60 - rw / 2, 0, Math.PI * 2); ctx.stroke() } }
+  const disc = (fill, ring, rw = 12) => { shape = "disc"; ctx.beginPath(); ctx.arc(cx, cy, 62, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill(); if (ring) { ctx.lineWidth = rw; ctx.strokeStyle = ring; ctx.beginPath(); ctx.arc(cx, cy, 62 - rw / 2, 0, Math.PI * 2); ctx.stroke() } }
   const square = (fill, r = 10) => { ctx.fillStyle = fill; roundRect(ctx, 4, 4, W - 8, H - 8, r); ctx.fill() }
   const triangle = (up = true) => {
+    shape = up ? "triangle" : "triangle-down"
     ctx.beginPath()
     if (up) { ctx.moveTo(cx, 6); ctx.lineTo(W - 4, H - 10); ctx.lineTo(4, H - 10) } else { ctx.moveTo(4, 10); ctx.lineTo(W - 4, 10); ctx.lineTo(cx, H - 6) }
     ctx.closePath(); ctx.fillStyle = WHITE; ctx.fill(); ctx.lineWidth = 11; ctx.lineJoin = "round"; ctx.strokeStyle = RED; ctx.stroke()
   }
-  const diamond = (inner) => { ctx.beginPath(); ctx.moveTo(cx, 2); ctx.lineTo(W - 2, cy); ctx.lineTo(cx, H - 2); ctx.lineTo(2, cy); ctx.closePath(); ctx.fillStyle = WHITE; ctx.fill()
+  const diamond = (inner) => { shape = "diamond"; ctx.beginPath(); ctx.moveTo(cx, 2); ctx.lineTo(W - 2, cy); ctx.lineTo(cx, H - 2); ctx.lineTo(2, cy); ctx.closePath(); ctx.fillStyle = WHITE; ctx.fill()
     ctx.beginPath(); ctx.moveTo(cx, 18); ctx.lineTo(W - 18, cy); ctx.lineTo(cx, H - 18); ctx.lineTo(18, cy); ctx.closePath(); ctx.fillStyle = inner; ctx.fill() }
-  const octagon = () => { ctx.beginPath(); for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; ctx.lineTo(cx + 62 * Math.cos(a), cy + 62 * Math.sin(a)) } ctx.closePath(); ctx.fillStyle = RED; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = WHITE; ctx.stroke() }
+  const octagon = () => { shape = "octagon"; ctx.beginPath(); for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; ctx.lineTo(cx + 63 * Math.cos(a), cy + 63 * Math.sin(a)) } ctx.closePath(); ctx.fillStyle = RED; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = WHITE; ctx.stroke() }
   const slash = (color = RED, w = 10) => { ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = "butt"; ctx.beginPath(); ctx.moveTo(cx - 38, cy - 38); ctx.lineTo(cx + 38, cy + 38); ctx.stroke() }
   const cross = (color = RED, w = 10) => { slash(color, w); ctx.beginPath(); ctx.moveTo(cx + 38, cy - 38); ctx.lineTo(cx - 38, cy + 38); ctx.stroke() }
   const label = (str, size, color = BLACK, y = cy, weight = "bold", maxW = W - 24) => {
@@ -139,12 +174,10 @@ function paint(code, black, text) {
   ctx.clearRect(0, 0, W, H)
   if (zone && /^A[1-3]/.test(code)) {                              // zone sign: white plate with the disc and "zone"
     ctx.fillStyle = WHITE; roundRect(ctx, 2, 2, W - 4, H - 4, 8); ctx.fill()
-    ctx.save(); ctx.translate(-56, 0); disc(WHITE, RED, 11); label(value, 54, BLACK, cy, "bold", 84); ctx.restore()
-    label("zone", 40, BLACK, cy, "bold", 100); ctx.save(); ctx.translate(60, 0); ctx.restore()
-    ctx.fillStyle = BLACK; ctx.font = `bold 40px ${FONT}`; ctx.textAlign = "left"; ctx.fillText("zone", cx + 12, cy)
-    ctx.clearRect(cx - 4, 0, 16, 0)
-    w = 1.2; h = 0.6
-    return finish(c, w, h)
+    ctx.strokeStyle = "#c9c9c3"; ctx.lineWidth = 3; roundRect(ctx, 6, 6, W - 12, H - 12, 6); ctx.stroke()
+    ctx.save(); ctx.translate(-56, 0); disc(WHITE, RED, 11); label(value || "30", 54, BLACK, cy, "bold", 84); ctx.restore()
+    ctx.fillStyle = BLACK; ctx.font = `bold 44px ${FONT}`; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText("zone", cx + 6, cy)
+    return finish(c, 1.2, 0.6, "rect")
   }
   switch (family) {
     case "A1": case "A3": disc(WHITE, RED, 11); label(value || "50", 56); break
@@ -246,10 +279,61 @@ function paint(code, black, text) {
       else if (/^L/.test(code)) { square(BLUE); label(code, 36, WHITE) }
       else return null
   }
-  return finish(c, w, h)
+  return finish(c, w, h, shape)
 }
 
-function finish(canvas, w, h) { return { canvas, w, h } }
+function finish(canvas, w, h, shape = "rect") { return { canvas, w, h, shape } }
+
+// ---- plate geometry --------------------------------------------------------------------------------------------
+
+// The outline the canvas was painted inside, as a convex ring in the plate's own XY plane, counter-clockwise seen
+// from the front. Everything is expressed as a fraction of the plate so a 0.7 m disc and a 1.4 m wegwijzer share
+// the code. The fractions sit a hair outside the painted shape so no paint is clipped by the silhouette.
+export function outline(shape, w, h) {
+  const ring = []
+  const poly = (n, r, phase) => { for (let i = 0; i < n; i++) { const a = phase + i * 2 * Math.PI / n; ring.push([Math.cos(a) * r * w, Math.sin(a) * r * h]) } }
+  if (shape === "disc") poly(16, 0.495, 0)
+  else if (shape === "octagon") poly(8, 0.50, Math.PI / 8)
+  else if (shape === "diamond") { ring.push([0.5 * w, 0], [0, 0.5 * h], [-0.5 * w, 0], [0, -0.5 * h]) }
+  else if (shape === "triangle") { ring.push([-0.5 * w, -0.46 * h], [0.5 * w, -0.46 * h], [0, 0.5 * h]) }
+  else if (shape === "triangle-down") { ring.push([-0.5 * w, 0.46 * h], [0, -0.5 * h], [0.5 * w, 0.46 * h]) }
+  else ring.push([-0.5 * w, -0.5 * h], [0.5 * w, -0.5 * h], [0.5 * w, 0.5 * h], [-0.5 * w, 0.5 * h])
+  return { ring, w, h }
+}
+
+// UVs come from where the vertex sits in the plate, which is where it sits on the canvas: the drawing filled the
+// whole square, so v = 0 is its bottom row and the texture's default flip puts that at the bottom of the sign.
+const plateUv = ([x, y], w, h) => [x / w + 0.5, y / h + 0.5]
+
+// the painted face, a fan over the convex ring at +z
+export function plateFace({ ring, w, h }, z) {
+  const pos = [], uv = []
+  for (let i = 1; i < ring.length - 1; i++) {
+    for (const p of [ring[0], ring[i], ring[i + 1]]) { pos.push(p[0], p[1], z); uv.push(...plateUv(p, w, h)) }
+  }
+  return fromArrays(pos, uv)
+}
+
+// the galvanised back and the stamped edge band, as one geometry: the back face reversed at −z, then a quad per edge
+export function plateShell({ ring, w, h }, z) {
+  const pos = [], uv = []
+  const push = (p, zz) => { pos.push(p[0], p[1], zz); uv.push(...plateUv(p, w, h)) }
+  for (let i = 1; i < ring.length - 1; i++) { push(ring[0], -z); push(ring[i + 1], -z); push(ring[i], -z) }
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length]
+    push(a, z); push(a, -z); push(b, -z)
+    push(a, z); push(b, -z); push(b, z)
+  }
+  return fromArrays(pos, uv)
+}
+
+function fromArrays(pos, uv) {
+  const g = new THREE.BufferGeometry()
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2))
+  g.computeVertexNormals()
+  return g
+}
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath()

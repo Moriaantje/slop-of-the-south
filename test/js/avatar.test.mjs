@@ -29,3 +29,36 @@ test("T folds the car into the mech at the swap time and unfolds it by the end",
   p.integrate(dt, keys({ transform: true })); p.settle(flat)
   assert.ok(!p.transforming)
 })
+
+test("the transformation folds instead of spinning, and leaves both bodies exactly as it found them", () => {
+  const scene = new THREE.Scene()
+  const p = new Avatar({ spawn: { x: 0, z: 0, yaw: 0 }, spec: vehicleSpec("trike"), scene, heightAt: flat })
+  const car = p.car.mesh, carBody = car.children[0]
+  const dt = 1 / 60
+  p.integrate(dt, keys({ transform: true })); p.settle(flat)
+  let folded = 0, spin = 0
+  let t = dt
+  while (t < T.transform.swapAt - dt) {
+    p.integrate(dt, keys()); p.settle(flat)
+    folded = Math.max(folded, 1 - carBody.scale.z)
+    spin = Math.max(spin, Math.abs(car.rotation.y - p.car.yaw))
+    t += dt
+  }
+  assert.ok(folded > 0.4, `the car barely folded (${folded})`)
+  assert.ok(spin < 0.3, `the car spun ${spin} rad: the transformation is a fold, not a pirouette`)
+  // the mech unfolds with an overshoot: its body must pass its resting pose and come back
+  let over = 0
+  while (t < T.transform.time + 2 * dt) {
+    p.integrate(dt, keys()); p.settle(flat)
+    if (p.morph) over = Math.min(over, 1 - p.mech.body.scale.y)
+    t += dt
+  }
+  assert.ok(over < -0.005, `the mech arrived without a settle (${over})`)
+  assert.ok(!p.transforming)
+  assert.deepEqual([carBody.scale.x, carBody.scale.y, carBody.scale.z], [1, 1, 1], "the car was left folded")
+  assert.deepEqual([p.mech.body.scale.x, p.mech.body.scale.y, p.mech.body.scale.z], [1, 1, 1])
+  for (const w of car.userData.wheels) {
+    assert.ok(Math.abs(w.pivot.position.x - w.lx) < 1e-9 && Math.abs(w.pivot.position.z - w.lz) < 1e-9)
+    assert.equal(Math.abs(w.pivot.rotation.z), 0)
+  }
+})

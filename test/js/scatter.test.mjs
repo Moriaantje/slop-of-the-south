@@ -17,18 +17,18 @@ test("some meadows are hedged and some are left open; a hedged one gets a contin
   for (let i = 0; i < 14; i++) {
     const s = scat()
     s.plan(tile([[1, square(150, i * 37, i * 53)]]))
-    const bush = s.plans.get("0_0").get("bush") ?? []
-    // the hedgerow rule steps every 2.6 m: a dressed 600 m boundary yields well over a hundred pieces
-    if (bush.length / 6 > 100) { hedged++; best ??= { s, bush, ox: i * 37, oz: i * 53 } } else open++
+    const hedge = s.plans.get("0_0").get("hedge") ?? []
+    // the hedgerow rule steps every 1.25 m: a dressed 600 m boundary yields hundreds of overlapping pieces
+    if (hedge.length / 6 > 100) { hedged++; best ??= { s, hedge, ox: i * 37, oz: i * 53 } } else open++
   }
   assert.ok(hedged >= 3 && open >= 3, `hedged ${hedged}, open ${open} of 14 meadows`)
-  const { bush, ox, oz } = best
+  const { hedge, ox, oz } = best
   let onEdge = 0
-  for (let i = 0; i < bush.length; i += 6) {
-    const x = bush[i] - ox, z = bush[i + 2] - oz
+  for (let i = 0; i < hedge.length; i += 6) {
+    const x = hedge[i] - ox, z = hedge[i + 2] - oz
     if (Math.min(x, z, 150 - x, 150 - z) < 3) onEdge++
   }
-  assert.ok(onEdge > bush.length / 6 * 0.9, "the hedge follows the boundary")
+  assert.ok(onEdge > hedge.length / 6 * 0.9, "the hedge follows the boundary")
 })
 
 test("arable land gets hay bales and field trees, yards get barrels and crates, and codes do not bleed", () => {
@@ -45,10 +45,19 @@ test("arable land gets hay bales and field trees, yards get barrels and crates, 
   assert.ok(fenced >= 1 && fenced <= 9, `${fenced} of 12 yards fenced`)
 })
 
-test("water is skipped and holes are respected", () => {
+test("only reeds dress open water, and they stand on the bank; holes are respected", () => {
   const s = scat()
   s.plan(tile([[30, 3.2, square(200)]]))
-  assert.equal(s.plans.get("0_0").size, 0, "nothing floats on water")
+  const plan = s.plans.get("0_0")
+  assert.deepEqual([...plan.keys()], ["reed"], "nothing but reeds goes near water")
+  const reed = plan.get("reed")
+  assert.ok(reed.length / 6 > 50, "a 800 m watercourse bank carries a good many reeds")
+  for (let i = 0; i < reed.length; i += 6) {
+    const x = reed[i], z = reed[i + 2]
+    const outside = Math.min(x, z, 200 - x, 200 - z)
+    assert.ok(outside < 0, `a reed at ${x.toFixed(1)}, ${z.toFixed(1)} is standing in open water`)
+    assert.ok(outside > -2, "and it has not wandered off into the field")
+  }
   const holed = scat()
   const outer = square(300), hole = []
   for (const [x, z] of [[100, 100], [200, 100], [200, 200], [100, 200]]) hole.push(x * 10, z * 10)

@@ -1,7 +1,7 @@
 import * as THREE from "three"
 import { TerrainTile } from "game/TerrainTile"
 import { buildRoads } from "game/Roads"
-import { buildBuildings } from "game/Buildings"
+import { footprintParts } from "game/Buildings"
 import { buildBuildingMeshes } from "game/BuildingMeshes"
 import { buildTrees } from "game/Trees"
 import { buildLamps, buildSignals } from "game/Furniture"
@@ -135,9 +135,9 @@ export class ChunkManager {
       const roads = buildRoads(data.roads, data.junctions, data.biome, (x, z) => terrain.heightAt(x, z))
       if (roads) group.add(roads)
       const roadIndex = indexRoads(data.roads, data.junctions ?? [])
-      const buildings = buildBuildings(withoutMeshed(data.buildings, data.meshes), reg)
-      if (buildings) group.add(buildings)
-      const meshes = buildBuildingMeshes(data.meshes, reg)
+      // One merged group for both kinds of building. The BAG meshes and the fallback footprints share the same six
+      // materials, so building them separately merged each material twice and doubled a tile's building draw calls.
+      const meshes = buildBuildingMeshes([...(data.meshes ?? []), ...footprintParts(withoutMeshed(data.buildings, data.meshes))], reg)
       if (meshes) group.add(meshes)
       const trees = buildTrees(data.trees, (x, z) => terrain.heightAt(x, z), reg)
       if (trees) group.add(trees)
@@ -148,7 +148,7 @@ export class ChunkManager {
       // shadows: the ground and the roads receive, everything standing casts and receives
       terrain.mesh.receiveShadow = true
       if (roads) roads.traverse((o) => { if (o.isMesh) o.receiveShadow = true })
-      for (const g of [buildings, meshes, trees]) g?.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
+      for (const g of [meshes, trees]) g?.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
       this.scene.add(group)
       const tile = { key, tx, ty, group, terrain, roads: data.roads, roadIndex, junctions: data.junctions ?? [], biome: data.biome, objects, water: waterPolys(data.cover ?? [], data.origin), coverClass, cover: data.cover ?? [] }
       this.tiles.set(key, tile)
