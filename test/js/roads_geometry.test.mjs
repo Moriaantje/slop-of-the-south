@@ -72,8 +72,9 @@ test("the kerb stone stands CURB above the carriageway edge and the gutter dips 
 })
 
 test("the carriageway is cambered: the crown stands proud of both edges", () => {
+  // measured on a kerbed street, whose edge is a hard line at the kerb; a country lane's edge deliberately frays
   const f = frames(straight(4), 4, ROAD_LIFT, null)
-  const group = buildRoads([{ kind: "secondary", width: 8, pts: straight(4) }], [], "platteland", null)
+  const group = buildRoads([{ kind: "residential", width: 8, pts: straight(4) }], [], "woonwijk", null)
   const road = group.children.find((m) => m.material.userData.set === "asphalt")
   const pos = road.geometry.attributes.position
   let centre = -Infinity, edge = Infinity
@@ -83,6 +84,20 @@ test("the carriageway is cambered: the crown stands proud of both edges", () => 
   }
   assert.ok(centre - edge > 0.03 && centre - edge <= 0.06 + 1e-6, `camber ${(centre - edge).toFixed(3)} m`)
   assert.ok(f.total > 0)
+})
+
+test("a lane with no kerb frays into its verge, a kerbed street does not", () => {
+  const edges = (biome, kind) => {
+    const group = buildRoads([{ kind, width: 8, pts: straight(4) }], [], biome, null)
+    const pos = group.children.find((m) => m.material.userData.set === "asphalt").geometry.attributes.position
+    const xs = [], ys = []
+    for (let i = 0; i < pos.count; i++) if (Math.abs(pos.getX(i)) > 3.2) { xs.push(Math.abs(pos.getX(i))); ys.push(pos.getY(i)) }
+    return { spread: Math.max(...xs) - Math.min(...xs), drop: Math.max(...ys) - Math.min(...ys) }
+  }
+  const lane = edges("platteland", "secondary"), street = edges("woonwijk", "residential")
+  assert.ok(lane.spread > 0.15, `the lane's edge wanders (${lane.spread.toFixed(2)} m)`)
+  assert.ok(lane.drop > 0.05, `and dips under the verge (${lane.drop.toFixed(2)} m)`)
+  assert.ok(street.spread < 0.01, `the kerbed street's edge is straight (${street.spread.toFixed(3)} m)`)
 })
 
 test("a junction patch meets the mouths that arrive at different heights", () => {

@@ -74,9 +74,16 @@ export const KIT = ["stump", "logpile", "reed", "molehill", "gate", "drystone", 
 
 // [{ geometry, material }] for one kit piece, built once. Every piece stands on y = 0 and is sized in metres, so
 // Scatter's uniform scale reads as "how big is this one" rather than a magic number.
+// Hedges, gates and walls are modelled lying along x because that is how you think about a wall while building it,
+// but a boundary piece has to run along its own z: Scatter turns a prop so that its z follows the field edge, which
+// is the convention the imported kit fences already use. Turning the geometry once here keeps every edge piece
+// consistent, rather than making the placement code remember which model was built which way round.
+const ALONG_X = new Set(["hedge", "gate", "drystone"])
+
 export function kitPiece(name) {
   if (pieces.has(name)) return pieces.get(name)
   const out = BUILD[name] ? BUILD[name]() : []
+  if (ALONG_X.has(name)) for (const p of out) p.geometry.rotateY(Math.PI / 2)
   pieces.set(name, out)
   return out
 }

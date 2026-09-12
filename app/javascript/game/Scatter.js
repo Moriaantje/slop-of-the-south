@@ -240,10 +240,14 @@ export class Scatter {
       if (!rings.length) continue
       // nothing stands on open water; only the boundary rules that ask for it dress a watercourse, from the bank
       if (code !== WATER_CODE) for (const rule of AREA) if (rule.codes.includes(code)) this.area(rule, rings, add, free)
-      for (const rule of EDGE) {
-        if (!rule.codes.includes(code)) continue
-        if (code === WATER_CODE && !rule.water) continue
-        this.edge(rule, rings, add, free)
+      // A boundary gets at most ONE treatment. Rolling each rule's own dice independently let a hedgerow, a post
+      // fence and a dry-stone wall all win the same field edge, drawn straight into one another: a wooden fence with
+      // a stone wall standing inside it. The rules that apply to this cover class are weighted by their own `ring`
+      // chance and one is drawn per ring; the rest of the weight leaves that boundary bare.
+      const applicable = EDGE.filter((r) => r.codes.includes(code) && (code !== WATER_CODE || r.water))
+      if (applicable.length) for (const ring of rings) {
+        const rule = pickEdge(applicable, ring)
+        if (rule) this.edge(rule, [ring], add, free)
       }
     }
     this.plans.set(t.key, plan)
@@ -277,7 +281,6 @@ export class Scatter {
     for (const ring of rings) {
       const n = ring.length / 2
       if (n < 3) continue
-      if (hash(ring[0] * 3.7 + ring[1] * 1.3 + rule.gap * 97) > (rule.ring ?? 1)) continue   // this boundary is left bare
       let carry = 0
       for (let i = 0; i < n; i++) {
         const ax = ring[i * 2], az = ring[i * 2 + 1]
@@ -300,4 +303,17 @@ export class Scatter {
       }
     }
   }
+}
+
+// Which treatment a boundary gets, if any. The rules' `ring` chances are laid end to end and one hash of the ring's
+// first vertex picks a point along that line; past the end of the last rule the boundary is left bare. Deterministic,
+// so a field looks the same every time you drive past it.
+function pickEdge(rules, ring) {
+  const roll = hash(ring[0] * 3.7 + ring[1] * 1.3 + 97)
+  let at = 0
+  for (const rule of rules) {
+    at += rule.ring ?? 1
+    if (roll < at) return rule
+  }
+  return null
 }

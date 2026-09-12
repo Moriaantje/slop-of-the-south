@@ -125,7 +125,8 @@ export function buildRoads(roads, junctions, biome, terrainAt = null) {
     const outer = hw + (kerbed ? WALK_REACH : 0)
     const f = frames(road.pts, outer, LIFT, terrainAt, kerbed ? KERB[6][1] : 0)
     const carriage = CARRIAGE.map((t) => [t * hw, crown(hw) * (1 - t * t)])
-    add(surface(style.surface), strip(f, carriage, 0, hw, packCode(PART.ROAD, seed)))
+    // an unkerbed road frays into its verge; a kerbed street ends where the kerb says it ends
+    add(surface(style.surface), strip(f, carriage, 0, hw, packCode(PART.ROAD, seed), { soften: kerbed ? 0 : EDGE_WANDER }))
     if (kerbed) {
       const kerbCols = (sign) => KERB.slice(0, 6).map(([o, dy]) => [sign * (hw + o), dy])
       const walkCols = (sign) => KERB.slice(5).map(([o, dy]) => [sign * (hw + o), dy])
@@ -166,7 +167,11 @@ export function buildRoads(roads, junctions, biome, terrainAt = null) {
   return group
 }
 
+const EDGE_WANDER = 0.42        // m: how far the outer edge of an unkerbed road wanders in and out, and sinks
+
 const crown = (hw) => Math.min(CROWN * hw, CROWN_MAX)
+// a stable hash of a world position in [0, 1): two tiles asked about the same metre get the same answer
+function edgeHash(x, z) { const v = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return v - Math.floor(v) }
 const seedOf = (road) => (hash32(`${road.kind}:${Math.round(road.pts[0][0])}:${Math.round(road.pts[0][1])}`) % 1024) / 1024
 
 // ---- the cross-section extruder -----------------------------------------------------------------------------------
@@ -223,7 +228,14 @@ function blur(a) {
 // ordered left to right. `u0` is where this strip starts across the section so the photo runs on unbroken from the
 // strip before it. `code` goes into aRoad.w — a part plus a seed for the surfaces, a pattern plus a lane count for
 // the markings. `ends` gives the markings the distance to each give-way junction.
-export function strip(f, cols, u0, hw, code, { dy = 0, ends = null } = {}) {
+// `soften` metres of wander on the outermost column. A kerbed street should end at a hard line, because that is what
+// a kerb is, but a country lane has no edge: the tarmac frays into the verge, gravel and grass creep over it and the
+// last hand's width of it is broken. A straight polygon boundary there is the strongest tell that this is geometry
+// rather than ground, so the outer column is pushed in and out along its own cross-section and dipped below the
+// surface by a world-space hash. Where it dips under, the terrain — which the road only clears by a few centimetres —
+// comes through, and the edge reads as worn rather than cut. The hash is keyed to world position, so two tiles agree
+// on their shared edge and neighbouring strips of the same road line up.
+export function strip(f, cols, u0, hw, code, { dy = 0, ends = null, soften = 0 } = {}) {
   const { n, fx, fz, lx, lz, ys, alongs, rise, outer } = f
   const C = cols.length
   if (n < 2 || C < 2) return null
@@ -234,7 +246,13 @@ export function strip(f, cols, u0, hw, code, { dy = 0, ends = null } = {}) {
   const idx = []
   for (let i = 0; i < n; i++) {
     for (let c = 0; c < C; c++) {
-      const o = cols[c][0], h = cols[c][1]
+      let o = cols[c][0]
+      let h = cols[c][1]
+      if (soften && (c === 0 || c === C - 1)) {
+        const wx = fx[i] + lx[i] * o, wz = fz[i] + lz[i] * o
+        o += (edgeHash(wx * 0.9, wz * 0.9) - 0.45) * soften * Math.sign(o || 1)
+        h -= (0.35 + 0.65 * edgeHash(wx * 2.7 + 31, wz * 2.7 - 17)) * soften * 0.5
+      }
       const side = o >= 0 ? 0 : 1
       const k = outer > 0 ? smoothstep(0.2, 1.0, Math.abs(o) / outer) : 0
       const v = i * C + c
