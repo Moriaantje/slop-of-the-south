@@ -8,6 +8,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
 import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js"
 import { off } from "game/Flags"
 import { TUNING as T } from "game/Tuning"
+import { ALPHA } from "game/Layers"
 
 // The post-processing chain, the part of the look that geometry cannot give: ground-truth ambient occlusion
 // (Jimenez et al. 2016, three's GTAOPass with its Poisson denoiser) darkens the foot of every wall, the underside of
@@ -76,10 +77,10 @@ export class Post {
     // The AO pass draws depth and normals with an override material that knows nothing of alpha: every sprite, leaf
     // card, grass tuft and label would occlude as a solid quad and wear a dark box. Everything cut out or transparent
     // lives on layer 1, which the main camera and the shadow camera see and the AO pre-pass does not.
-    world.camera.layers.enable(1)
-    world.sun.shadow.camera.layers.enable(1)
+    world.camera.layers.enable(ALPHA)
+    world.sun.shadow.camera.layers.enable(ALPHA)
     const aoRender = this.ao.render.bind(this.ao)
-    this.ao.render = (...args) => { world.camera.layers.disable(1); aoRender(...args); world.camera.layers.enable(1) }
+    this.ao.render = (...args) => { world.camera.layers.disable(ALPHA); aoRender(...args); world.camera.layers.enable(ALPHA) }
     this.frame = 0
     this.bloom = new UnrealBloomPass(size.clone().multiplyScalar(0.5), T.look.post.bloom, 0.55, 0.9)
     this.composer.addPass(this.bloom)
@@ -114,17 +115,19 @@ export class Post {
 
   // darkness 0..1: bloom bites harder at night (lit windows, fire), the AO a little less
   // new objects arrive all the time (tiles, effects): sort them onto the alpha layer once a second
+  // Most cut-outs claim the layer themselves (game/Layers.noAO). This is the safety net for anything that does not,
+  // and for glTF props whose materials only turn out to be alpha-tested once the file has loaded.
   classify() {
     this.world.scene.traverse((o) => {
       if (o.layers.mask !== 1) return
       const m = o.material
-      if (o.isSprite || (m && (m.alphaTest > 0 || m.transparent))) o.layers.set(1)
+      if (o.isSprite || (m && (m.alphaTest > 0 || m.transparent))) o.layers.set(ALPHA)
     })
   }
 
   render(darkness = 0) {
     if (!this.enabled) { this.world.render(); return }
-    if (this.frame++ % 30 === 0) this.classify()
+    if (this.frame++ % 8 === 0) this.classify()
     const P = T.look.post
     this.ao.blendIntensity = P.ao
     this.bloom.strength = P.bloom * (1 + 0.8 * darkness)

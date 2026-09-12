@@ -1,6 +1,7 @@
 import * as THREE from "three"
 import { pointKey } from "game/Destructibles"
 import { mulberry32, TUNING as T } from "game/Tuning"
+import { noAO } from "game/Layers"
 import { WIND, WIND_PARS } from "game/Wind"
 import { leafAtlas, barkTexture, bleedAlpha, clamp01 } from "game/Foliage"
 
@@ -247,8 +248,8 @@ function buildKind(kind, list, heightAt, reg) {
   g.tiers = data.variants.map((variant, v) => {
     const cap = Math.max(1, g.perVariant[v])
     const wood = new THREE.InstancedMesh(variant.wood, barkMaterial(), cap)
-    const leaves = new THREE.InstancedMesh(variant.leaves, leafMaterial(SPECIES[data.names[v]].foliage), cap)
-    const far = new THREE.InstancedMesh(data.far[v], data.material, cap)
+    const leaves = noAO(new THREE.InstancedMesh(variant.leaves, leafMaterial(SPECIES[data.names[v]].foliage), cap))
+    const far = noAO(new THREE.InstancedMesh(data.far[v], data.material, cap))
     for (const mesh of [wood, leaves, far]) {
       mesh.castShadow = mesh.receiveShadow = true
       mesh.count = 0; mesh.visible = false

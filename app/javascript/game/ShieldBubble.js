@@ -1,5 +1,6 @@
 import * as THREE from "three"
 import { expDamp } from "game/Tuning"
+import { noAO } from "game/Layers"
 
 // The wizard mech's shield: a translucent sphere lit at the rim (fresnel) with a slow ripple, additive so it glows
 // against the sky and the ground alike. Fades in and out over a tenth of a second.
@@ -25,7 +26,7 @@ export class ShieldBubble {
   constructor(parent, r = 3, y = 2.2, color = 0x6fb8ff) {
     this.material = new THREE.ShaderMaterial({ uniforms: { color: { value: new THREE.Color(color) }, opacity: { value: 0 }, time: { value: 0 } },
       vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })
-    this.mesh = new THREE.Mesh(geo, this.material)
+    this.mesh = noAO(new THREE.Mesh(geo, this.material))   // a bubble round the camera would black the AO out
     this.mesh.scale.setScalar(r)
     this.mesh.position.y = y
     this.mesh.visible = false

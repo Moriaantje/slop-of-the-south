@@ -1,5 +1,6 @@
 import * as THREE from "three"
 import { nearRoad, insideAny, inBuilding, hash } from "game/Placement"
+import { noAO } from "game/Layers"
 import { WIND, WIND_PARS } from "game/Wind"
 import { bleedAlpha, blob, shade, paletteOf } from "game/Foliage"
 
@@ -241,7 +242,7 @@ export class Grass {
         spots.push([x, this.heightAt(x, z), z, i])
       }
     }
-    const mesh = new THREE.InstancedMesh(geometry, grassMaterial(kind, isDense), Math.max(1, spots.length))
+    const mesh = noAO(new THREE.InstancedMesh(geometry, grassMaterial(kind, isDense), Math.max(1, spots.length)))
     spots.forEach(([x, y, z, i], j) => {
       const lush = pts[i + 3]
       q.setFromAxisAngle(up, hash(x * 0.37 + z * 0.91) * Math.PI)

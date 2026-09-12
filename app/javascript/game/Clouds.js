@@ -20,7 +20,12 @@ import * as THREE from "three"
 // the rims facing the sun, which is the detail the eye actually recognises. Eight texture reads per sky pixel, all
 // from one 256 px canvas texture made once at load.
 const CUMULUS_H = 1500, CIRRUS_H = 7000          // m above the player: the two decks
-const CUMULUS_M = 1 / 2600                       // uv per metre on the cumulus deck (one tile ≈ 2.6 km)
+const CUMULUS_M = 1 / 7000                       // uv per metre on the cumulus deck (one tile ≈ 7 km)
+const BREAK_M = 0.373                            // the second tap's scale, as a fraction of the first. A single
+                                                 // tiling texture repeats visibly across a sky this wide, so the
+                                                 // body is the product of two taps at an incommensurate ratio and a
+                                                 // rotation between them: the pattern only truly repeats where both
+                                                 // line up again, which is far past the horizon.
 const CIRRUS_M = 1 / 9000                        // cirrus tiles far larger, as high thin sheets do
 const CIRRUS_STRETCH = 0.22                      // squash across the wind: streaks, not blobs
 const SHELL_R = 3300                             // m: inside the camera's far plane (4000)
@@ -93,7 +98,20 @@ const CLOUD_FRAG = /* glsl */`
   // the world XZ where this view ray meets a deck h metres above the camera
   vec2 deck(vec3 d, float h) { return cameraPosition.xz + d.xz * (h / max(d.y, 0.02)); }
 
-  float body(vec2 uv) { return texture2D(uNoise, uv).r * 0.80 + texture2D(uNoise, uv * 3.1 + vec2(0.37, 0.13)).g * 0.30; }
+  // the rotation that puts the second tap off the first one's grid (about 31 degrees)
+  const mat2 BREAK_ROT = mat2(0.857, -0.515, 0.515, 0.857);
+  float body(vec2 uv) {
+    float a = texture2D(uNoise, uv).r;
+    float b = texture2D(uNoise, BREAK_ROT * uv * ${BREAK_M.toFixed(4)} + vec2(0.21, 0.63)).r;
+    float erode = texture2D(uNoise, uv * 3.1 + vec2(0.37, 0.13)).g;
+    return (a * 0.62 + b * 0.55) * 0.86 + erode * 0.26;
+  }
+  // the shadow march only needs to know where the blobs are, not their eroded edges: two taps instead of three
+  float bodyLite(vec2 uv) {
+    float a = texture2D(uNoise, uv).r;
+    float b = texture2D(uNoise, BREAK_ROT * uv * ${BREAK_M.toFixed(4)} + vec2(0.21, 0.63)).r;
+    return (a * 0.62 + b * 0.55) * 0.86 + 0.13;
+  }
 
   void main() {
     vec3 d = normalize(vDir);
@@ -105,9 +123,10 @@ const CLOUD_FRAG = /* glsl */`
     float thr = mix(0.74, 0.28, uCover);
     float dens = max(body(uv) - thr, 0.0);
     float alpha = 1.0 - exp(-dens * ${DENSITY.toFixed(1)});
-    float occ = max(texture2D(uNoise, uv + uSunStep).r * 0.95 - thr, 0.0)
-              + max(texture2D(uNoise, uv + uSunStep * 2.3).r * 0.95 - thr, 0.0) * 0.7
-              + max(texture2D(uNoise, uv + uSunStep * 4.2).r * 0.95 - thr, 0.0) * 0.4;
+    // the self-shadow marches the same field, not just its first octave, or the shadow lands on the wrong blobs
+    float occ = max(bodyLite(uv + uSunStep) * 0.95 - thr, 0.0)
+              + max(bodyLite(uv + uSunStep * 2.3) * 0.95 - thr, 0.0) * 0.7
+              + max(bodyLite(uv + uSunStep * 4.2) * 0.95 - thr, 0.0) * 0.4;
     float beer = exp(-occ * ${ABSORB.toFixed(1)});
     // Henyey-Greenstein, g = 0.72: the rim between cloud and sky glows when you look through it at the sun. The
     // lobe runs to twenty-odd at zero scattering angle, which would be a white hole, so it is clamped as three's

@@ -1,4 +1,5 @@
 import * as THREE from "three"
+import { noAO } from "game/Layers"
 
 // A dragon's breath: an animated cone of fire from the mouth forward, the FlameWall shader folded around a cone.
 // One shared material (time uniform), one shared geometry: the cone points down -z from its apex at the origin so
@@ -43,7 +44,7 @@ let t = 0
 
 export class FireCone {
   constructor(parent) {
-    this.mesh = new THREE.Mesh(geo, material)
+    this.mesh = noAO(new THREE.Mesh(geo, material))
     this.mesh.renderOrder = 8
     this.mesh.visible = false
     this.mesh.frustumCulled = false

@@ -1,5 +1,6 @@
 import * as THREE from "three"
 import { nearRoad, insideRing, insideAny, inBuilding, hash } from "game/Placement"
+import { noAO } from "game/Layers"
 import { noiseTexture } from "game/Textures"
 import { KIT, kitPiece, kitStoneMaterial } from "game/Kit"
 
@@ -196,6 +197,7 @@ export class Scatter {
         const capacity = Math.max(64, 1 << Math.ceil(Math.log2(Math.max(count, 1))))
         pool = { capacity, meshes: groups.map(({ geometry, material }) => {
           const mesh = new THREE.InstancedMesh(geometry, material, capacity)
+          if (material.alphaTest > 0 || material.transparent) noAO(mesh)   // a card would occlude as its whole quad
           mesh.castShadow = mesh.receiveShadow = true
           mesh.frustumCulled = false
           mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
