@@ -1,22 +1,34 @@
 import * as THREE from "three"
 import { flag } from "game/Flags"
 
-// What the frame is allowed to cost. Everything expensive here is fill rate — the post chain, the shadow map and the
-// multisampled buffer are paid per pixel — so the levers are, in order of how much they buy: the resolution the
-// world is rendered at (upscaled to the canvas at the end, the dynamic-resolution trick every console game uses),
-// whether ambient occlusion runs and at what fraction, how large the shadow map is and how often it is redrawn, and
-// how big the bloom pyramid is. The level moves itself: the median of the last thirty frames decides, with a wide
-// dead band and a slow climb so it settles instead of oscillating. ?q=0..3 pins it, ?q=auto is the default.
+// What the frame is allowed to cost. Everything expensive here is fill rate — the post chain and the shadow map are
+// paid per pixel — so the levers are, in order of how much they buy: the resolution the world is rendered at
+// (upscaled to the canvas at the end, the dynamic-resolution trick every console game uses), how much of the post
+// chain runs at all, how large the shadow map is and how often it is redrawn. The level moves itself: the median of
+// the last thirty frames decides, with a wide dead band and a slow climb so it settles instead of oscillating.
+// ?q=0..4 pins it, ?q=auto is the default.
+//
+// The ladder now has a floor below what it used to have. Level 0 renders the world and puts it on the screen, full
+// stop: no occlusion, no bloom, no grade, no antialiasing, no second buffer to read and write. It is a different
+// picture — flatter, harder-edged, no vignette, no contact darkening — and it is the one to pick when frames matter
+// more than anything else, which is what was asked for. Level 1 buys the grade back for one full-screen pass, which
+// is most of the look for a small fraction of the old cost. From level 2 the occlusion joins in, at a quarter of
+// the buffer's width; from 3 the SMAA edge pass; 4 is everything, at full resolution.
 const LEVELS = [
-  // scale: fraction of the device pixels; ao: 0 = off, else the fraction of the buffer it runs at
-  { name: "fast",  scale: 0.60, ao: 0,    aoSamples: 4, bloom: 0.25, shadow: 1024, soft: false, shadowEvery: 3 },
-  { name: "mid",   scale: 0.72, ao: 0.25, aoSamples: 4, bloom: 0.25, shadow: 1536, soft: false, shadowEvery: 2 },
-  { name: "high",  scale: 0.85, ao: 0.5,  aoSamples: 6, bloom: 0.5,  shadow: 2048, soft: false, shadowEvery: 2 },
-  { name: "ultra", scale: 1.00, ao: 0.5,  aoSamples: 8, bloom: 0.5,  shadow: 2048, soft: true,  shadowEvery: 1 },
+  // scale: fraction of the device pixels. post: whether the chain runs at all. ao/bloom: 0 = off, else the fraction
+  // of the buffer that pass runs at. sharpen: multiplies the grade's sharpening. shadow: shadow map texels.
+  { name: "bare",  scale: 0.55, post: false, ao: 0,    bloom: 0,    smaa: false, sharpen: 0, shadow: 1024, soft: false, shadowEvery: 4 },
+  { name: "fast",  scale: 0.65, post: true,  ao: 0,    bloom: 0,    smaa: false, sharpen: 0, shadow: 1024, soft: false, shadowEvery: 3 },
+  { name: "mid",   scale: 0.75, post: true,  ao: 0.25, bloom: 0.25, smaa: false, sharpen: 1, shadow: 1536, soft: false, shadowEvery: 2 },
+  { name: "high",  scale: 0.85, post: true,  ao: 0.25, bloom: 0.5,  smaa: true,  sharpen: 1, shadow: 2048, soft: false, shadowEvery: 2 },
+  { name: "ultra", scale: 1.00, post: true,  ao: 0.5,  bloom: 0.5,  smaa: true,  sharpen: 1, shadow: 2048, soft: true,  shadowEvery: 1 },
 ]
+const START = 3                // the level a session opens at, before the frame time has had its say
 const WINDOW = 30              // frames per measurement
 const SLOW_MS = 20, FAST_MS = 11
 const MAX_SCALE = Math.min(devicePixelRatio || 1, 1.5)
+
+export { LEVELS }
 
 export class Quality {
   constructor(world, post) {
@@ -24,7 +36,7 @@ export class Quality {
     this.post = post
     const pin = flag("q")
     this.pinned = pin !== null && pin !== "auto" ? THREE.MathUtils.clamp(Number(pin) | 0, 0, LEVELS.length - 1) : null
-    this.level = this.pinned ?? 2
+    this.level = this.pinned ?? START
     this.times = []
     this.slow = 0; this.fast = 0
     this.frame = 0

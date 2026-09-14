@@ -1,16 +1,19 @@
-// Which objects the ambient-occlusion pre-pass is allowed to see.
+// Which objects a screen-space pre-pass is allowed to see.
 //
-// GTAOPass draws the scene's depth and normals with an override material that knows nothing about alpha. Anything
-// cut out of a quad — a leaf card, a grass tuft, a hedge, a sprite — therefore occludes as the whole quad, and the
-// occlusion it writes shows up in the frame as a dark rectangle around it. Anything large and translucent, like the
-// mech's shield bubble, is worse: it covers the screen at close range, and every pixel behind it comes back fully
-// occluded, which reads as the picture going black.
+// This layer was invented for three's GTAOPass, which drew the scene's depth and normals through an override
+// material that knew nothing about alpha: anything cut out of a quad — a leaf card, a grass tuft, a hedge, a sprite
+// — occluded as the whole quad and wore a dark rectangle, and anything large and translucent, like the mech's
+// shield bubble, blacked out everything behind it. So everything cut out or translucent was moved here, out of the
+// pre-pass's sight.
 //
-// So everything cut out or translucent lives on ALPHA layer. The main camera and the sun's shadow camera both have
-// that layer enabled, so it renders and casts as normal; the AO pre-pass turns it off for the duration of its own
-// render. Objects claim the layer when they are built rather than waiting for Post's periodic sweep to find them,
-// because the sweep cannot see an object that is not in the scene graph yet — the mech and its bubble exist long
-// before the first transform puts them there.
+// The occlusion now comes from the depth buffer the main render already wrote (game/Ao), and that buffer is written
+// by the real materials, alpha test and all, so a leaf occludes as a leaf and a bubble that writes no depth cannot
+// occlude at all. The layer survives because it is still the cheapest way to say "this thing is cut out or
+// see-through" to any pass that wants to know, and because half the world is already built onto it.
+//
+// The one rule that matters: the camera and the sun's shadow camera enable this layer in game/World, unconditionally
+// and for the life of the session. Nothing may make that conditional again — the last time it depended on the post
+// chain, turning the post chain off made every leaf in the province vanish.
 export const ALPHA = 1
 
 export function noAO(object) {

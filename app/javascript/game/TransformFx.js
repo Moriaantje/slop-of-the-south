@@ -1,14 +1,19 @@
 import * as THREE from "three"
 import { softTexture } from "game/Effects"
 
-// The light show around the transformation in Avatar.js. Four pieces, each chosen because it sells a different part
-// of the beat: a gathering glow that swells while the machine folds, so the fold reads as powered rather than as a
-// shrink; a flat shockwave ring on the ground at the swap, which is the cheapest possible way to put the event in
-// the world rather than on the screen (one quad, one shader, no geometry that expands); a short energy column that
-// shoots up through the machine and covers the frame where one body is exchanged for the other; and a handful of
-// sparks thrown outward. Everything is additive with depth writes off so the bloom pass picks it up, and every
-// object is allocated once on the first transformation and reused, because a transformation happens often enough
-// that per-burst allocation would show up as a hitch.
+// The light show around the transformation in Avatar.js. It used to have a job as well as a look: the flash covered
+// the one frame in which the car mesh left the scene and the mech mesh joined it. There is no such frame any more —
+// the machine is one mesh that poses itself from a car into a mech — so what is left is the look, and the one real
+// event still worth marking, which is the handover halfway through the beat where the physics, the HUD and the
+// server change bodies and the sprung attitude of a car gives way to the stance of something that walks.
+//
+// Four pieces, each selling a different part of the beat: a gathering glow that swells while the machine unfolds, so
+// the deployment reads as powered rather than as an inflation; a flat shockwave ring on the ground at the handover,
+// which is the cheapest possible way to put the event in the world rather than on the screen (one quad, one shader,
+// no geometry that expands); a short energy column that shoots up through the machine; and a handful of sparks
+// thrown outward. Everything is additive with depth writes off so the bloom pass picks it up, and every object is
+// allocated once — Avatar builds the lot up front — because a transformation happens often enough that per-burst
+// allocation would show up as a hitch.
 const RING_R = 9.0             // metres: the radius the shockwave reaches
 const RING_LIFE = 0.55         // seconds
 const COLUMN_R = 1.5           // metres
@@ -116,7 +121,7 @@ export class TransformFx {
     }
   }
 
-  // the gathering glow while the machine folds; k is the fold progress 0..1
+  // the gathering glow while the machine unfolds; k is the progress towards the handover, 0..1
   charge(x, y, z, k, colour) {
     this.build()
     this.colour.set(colour)
@@ -128,7 +133,7 @@ export class TransformFx {
     this.chargeMat.opacity = 0.75 * k * k
   }
 
-  // the swap itself: the ring, the column, the flash and the sparks all start here
+  // the handover: the ring, the column, the flash and the sparks all start here
   burst(x, y, z, colour) {
     this.build()
     this.colour.set(colour)
@@ -202,7 +207,7 @@ export class TransformFx {
     this.sparks.length = 0
   }
   // A morph can end without ever reaching burst(): reset() and setMode() both call finishMorph() straight from the
-  // fold-in. Without this the gathering glow stays on screen for the rest of the session.
+  // first half of the beat. Without this the gathering glow stays on screen for the rest of the session.
   clear() { if (this.built) this.chargeSprite.visible = false }
 
 }

@@ -6,6 +6,21 @@ import { TUNING as T } from "game/Tuning"
 // body outward. Front wheels show the steer angle, all wheels spin with the road speed.
 // The car's `y` stays the mean ground height under the wheels (Combat, beacons and placement rely on it); only the
 // mesh gets the sprung height and attitude.
+//
+// Two events the springs cannot work out for themselves are told to them, because a jump is a discontinuity and a
+// spring that is only ever driven by its target position will glide through one as if nothing happened. Leaving the
+// ground lets the wheels drop and the body rise on its own weight (`launch`), and arriving back drives the heave
+// velocity down in proportion to how fast the car was falling (`impact`), with a share of it going into pitch so the
+// nose dips as the front takes the landing first. That, and not the height of the arc, is what a landing looks like.
+// The bump stops are real too: the travel clamp used to silently hold the body still while the spring integrated a
+// velocity it would then release in one frame, which reads as a bounce out of nothing. Hitting a stop now kills most
+// of that velocity, the way a rubber stop does.
+const IMPACT_GAIN = 0.55       // heave velocity, m/s, per m/s of vertical speed at touchdown
+const IMPACT_MAX = 22          // m/s of fall past which the landing is no harder
+const IMPACT_PITCH = 0.16      // share of the impact that goes into a nose dip (rad/s per m/s)
+const LAUNCH_GAIN = 0.30       // heave velocity per m/s of the takeoff, the other way: the body rises off its springs
+const STOP_KEEP = 0.18         // share of the heave velocity a bump stop gives back
+
 export class Suspension {
   constructor(mesh) {
     this.mesh = mesh
@@ -14,6 +29,16 @@ export class Suspension {
   }
 
   reset() { this.h = null; this.hv = 0; this.pitch = 0; this.pv = 0; this.roll = 0; this.rv = 0 }
+
+  // the car has just touched down at v m/s: compress the springs and dip the nose
+  impact(v) {
+    const k = Math.min(Math.abs(v), IMPACT_MAX)
+    this.hv -= k * IMPACT_GAIN
+    this.pv -= k * IMPACT_PITCH
+  }
+
+  // …and has just left the ground: the wheels hang and the body comes up off its springs
+  launch(v) { this.hv += Math.min(Math.abs(v), IMPACT_MAX) * LAUNCH_GAIN }
 
   // car: { x, z, yaw, wheelbase, track, accLong, accLat, steer, wheelAngle, wheelWorld?, y (written) }
   update(car, heightAt, dt) {
@@ -50,7 +75,9 @@ export class Suspension {
       this.pv += (kA * (pitchT - this.pitch) - cA * this.pv) * hh; this.pitch += this.pv * hh
       this.rv += (kA * (rollT - this.roll) - cA * this.rv) * hh; this.roll += this.rv * hh
     }
-    this.h = clamp(this.h, gY - S.travel, gY + S.travel)
+    const stopped = clamp(this.h, gY - S.travel, gY + S.travel)
+    if (stopped !== this.h) { this.h = stopped; this.hv *= STOP_KEEP }      // a bump stop absorbs, it does not store
+
 
     this.mesh.position.set(car.x, this.h, car.z)
     this.mesh.rotation.set(this.pitch, car.yaw, this.roll, "YXZ")

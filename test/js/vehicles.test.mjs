@@ -2,6 +2,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import * as THREE from "three"
 import { VEHICLES, vehicleSpec, makeVehicleMesh, makeCarMesh } from "game/Vehicles"
+import { TUNING as T } from "game/Tuning"
 import { Kit, loft, profile, panel, revolve, strut, arch, tyreGeometry, rimGeometry } from "game/VehicleParts"
 
 const IDS = ["auto", ...VEHICLES.map((v) => v.id)]
@@ -37,10 +38,19 @@ test("the contract the rest of the game reads is intact for every vehicle", () =
       assert.ok(f.sprite.isSprite && f.mat.isMaterial, `${id}: flame record is not a sprite with its own material`)
       assert.ok(f.core.isSprite, `${id}: flame has no hot core`)
     }
-    assert.equal(typeof g.userData.fold, "function", `${id}: no fold`)
-    let meshes = 0
-    g.traverse((o) => { if (o.isMesh) meshes++ })
-    assert.ok(meshes > 0 && meshes < 30, `${id}: ${meshes} draw calls`)   // merging must hold the part count down
+    assert.equal(typeof g.userData.pose, "function", `${id}: no pose`)
+    assert.ok(g.userData.mech.rig && g.userData.mech.wizard, `${id}: no wizard half`)
+    // Merging must hold the part count down. A transforming machine costs more than the old single shell did: its
+    // panels sit on six mounts that have to move independently, and it carries the mech's frame and wardrobe. In the
+    // driving pose the mech half is switched off, so what is actually drawn is the middle figure.
+    let meshes = 0, drawn = 0
+    g.traverse((o) => { if (!o.isMesh) return; meshes++; let p = o, on = true; while (p) { if (!p.visible) on = false; p = p.parent }; if (on) drawn++ })
+    assert.ok(meshes > 0 && meshes < 56, `${id}: ${meshes} meshes`)
+    assert.ok(drawn < 34, `${id}: ${drawn} draw calls while merely driving`)
+    // …and a body that will never transform (a remote player's car) pays none of it
+    let plain = 0
+    makeVehicleMesh(id, 0x3366cc, { morph: false }).traverse((o) => { if (o.isMesh) plain++ })
+    assert.ok(plain < 24, `${id}: ${plain} draw calls for a non-transforming body`)
   }
 })
 
@@ -52,43 +62,63 @@ test("the tank and the crane keep the animated parts Combat drives", () => {
   assert.ok(Math.abs(crane.userData.anim.pivot.rotation.x - 0.75) < 1e-9, "the boom starts at the angle Combat resets it to")
 })
 
-test("fold(1) tucks the machine up and fold(0) puts every channel back exactly", () => {
+test("pose(1) stands every vehicle up as the same machine, and pose(0) puts every channel back exactly", () => {
   for (const id of IDS) {
     const g = makeVehicleMesh(id)
-    const body = g.children[0]
     const seed = () => { for (const w of g.userData.wheels) w.pivot.position.y = w.r }   // what the suspension writes
-    seed(); g.userData.fold(0)
-    assert.deepEqual([body.scale.x, body.scale.y, body.scale.z], [1, 1, 1], `${id}: fold(0) is not identity`)
-    assert.equal(Math.abs(body.position.y), 0)
-    assert.equal(Math.abs(body.rotation.x), 0)
+    const box = () => { g.updateMatrixWorld(true); return new THREE.Box3().setFromObject(g) }
 
-    seed(); g.userData.fold(1)
-    assert.ok(body.scale.z < 0.6 && body.scale.y > 1.2, `${id}: the body did not squeeze and stand up`)
-    assert.ok(body.position.y > 0.2 && body.rotation.x < -0.4, `${id}: the body did not rear up`)
+    seed(); g.userData.pose(1, 1)
+    const up = box(), size = up.getSize(new THREE.Vector3())
+    assert.ok(Math.abs(size.y - T.mech.height) < 0.5, `${id}: stands ${size.y.toFixed(2)} m, wanted ${T.mech.height}`)
+    assert.ok(Math.abs(up.min.y) < 0.05, `${id}: the feet are ${up.min.y.toFixed(2)} off the ground`)
+    assert.ok(size.z < size.y && size.x < size.y, `${id}: still lying down (${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)})`)
+    // the wheels are joints now: each one above the knee line or below it, none left out at the old corners
     for (const w of g.userData.wheels) {
-      assert.ok(Math.abs(w.pivot.position.x) < Math.abs(w.lx) + 1e-9, `${id}: wheel did not pull inboard`)
-      assert.ok(Math.abs(w.pivot.position.z) < Math.abs(w.lz) + 1e-9)
-      assert.ok(w.pivot.position.y > w.r, `${id}: wheel did not climb into the arch`)
-      assert.ok(Math.abs(w.pivot.rotation.z) > 0.5 || w.lx === 0)
+      const c = new THREE.Box3().setFromObject(w.mount).getCenter(new THREE.Vector3())
+      assert.ok(Math.abs(c.x) < 1.1 && c.y > 0.2 && c.y < 2.8, `${id}: a wheel ended up at ${c.x.toFixed(2)}, ${c.y.toFixed(2)}`)
     }
 
-    seed(); g.userData.fold(0)
+    const spine = g.children[0].children[0]
+    const spineUp = new THREE.Box3().setFromObject(spine).getCenter(new THREE.Vector3())
+    seed(); g.userData.pose(0, -1); g.updateMatrixWorld(true)
+    const spineDown = new THREE.Box3().setFromObject(spine).getCenter(new THREE.Vector3())
+    assert.ok(spineUp.y - spineDown.y > 0.9, `${id}: the chassis only rose ${(spineUp.y - spineDown.y).toFixed(2)} m to become a torso`)
     for (const w of g.userData.wheels) {
       assert.ok(Math.abs(w.pivot.position.x - w.lx) < 1e-9 && Math.abs(w.pivot.position.z - w.lz) < 1e-9, `${id}: wheel did not return`)
-      assert.equal(Math.abs(w.pivot.rotation.z), 0)
-      assert.equal(Math.abs(w.pivot.rotation.x), 0)
-      assert.ok(Math.abs(w.pivot.position.y - w.r) < 1e-9, `${id}: the fold left the suspension channel dirty`)
+      assert.ok(Math.abs(w.pivot.position.y - w.r) < 1e-9, `${id}: the morph left the suspension channel dirty`)
+      assert.deepEqual([w.mount.position.x, w.mount.position.y, w.mount.position.z], [0, 0, 0], `${id}: the wheel mount did not return`)
+    }
+    for (const part of g.userData.morph.parts) {
+      assert.ok(part.node.position.distanceTo(part.drive.position) < 1e-9 && part.node.scale.distanceTo(part.drive.scale) < 1e-9,
+        `${id}: a part did not come home`)
     }
   }
 })
 
-test("the fold runs through negative k for the landing squat without inverting", () => {
-  const g = makeCarMesh()
-  const body = g.children[0]
-  g.userData.fold(-0.06)
-  assert.ok(body.scale.y < 1 && body.scale.z > 1, "a negative fold must over-extend, not fold")
-  assert.ok(body.position.y < 0 && body.rotation.x > 0)
-  g.userData.fold(0)
+test("the morph never adds, removes or reveals anything: the machine is the same object list in both poses", () => {
+  for (const id of IDS) {
+    const g = makeVehicleMesh(id)
+    const census = () => { const out = []; g.traverse((o) => out.push(o)); return out }
+    const before = census()
+    for (const u of [0.15, 0.4, 0.62, 0.85, 1]) g.userData.pose(u, 1)
+    assert.deepEqual(census(), before, `${id}: the object list changed between the poses`)
+    // the walking-only parts are the one exception, and only at the ends: off while driving, on the moment it starts
+    const hidden = g.userData.morph.parts.filter((p) => p.hidden)
+    assert.ok(hidden.length >= 6, `${id}: the wizard's half is not registered with the morph`)
+    assert.ok(hidden.every((p) => p.node.visible), `${id}: the wizard's half is invisible while standing`)
+    g.userData.pose(0, -1)
+    assert.ok(hidden.every((p) => !p.node.visible), `${id}: the wizard's half is on show while driving`)
+  }
+})
+
+test("a body built without the morph is the old single-shell car, and its pose is a no-op", () => {
+  const g = makeVehicleMesh("auto", 0x3366cc, { morph: false })
+  assert.equal(g.userData.morph, null)
+  assert.equal(g.userData.mech, null)
+  g.userData.pose(1, 1)                                  // must not throw, must not move anything
+  assert.equal(g.children[0].children.length, g.children[0].children.length)
+  assert.ok(g.userData.wheels.length >= 2 && g.userData.lights.head.isMaterial)
 })
 
 test("a lofted hull is closed and faces outwards", () => {

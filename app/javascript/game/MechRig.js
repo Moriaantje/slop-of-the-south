@@ -2,18 +2,27 @@ import * as THREE from "three"
 import { TUNING as T } from "game/Tuning"
 import { Kit, loft, profile, panel, revolve, strut } from "game/VehicleParts"
 
-// The wizard mech's own body, built from geometry rather than downloaded, and the wizard's kit that hangs off it.
-// Two things live here. The rig is a walking biped with a hip, two thighs, two shins with feet, a chest, two arms
-// and a hooded head, each on its own pivot so it can actually walk instead of sliding along bobbing; it is what the
-// player sees while the CC0 glTF robot is still in flight, and what they see forever if the file never arrives, so
-// it has to stand on its own. The kit is the wizard half — a cloak, a telekinetically floating staff and a mana
-// core that pulses with the meter — and that goes on whichever body is present, because it is the thing that makes
-// a robot read as a sorcerer rather than as a machine borrowed from another game.
+// The wizard mech's skeleton and the wizard's wardrobe. Both are built out of the same coachbuilding kit the cars
+// are, and — this is the part that matters — both are built straight into the *vehicle's* kit, as pieces of the one
+// mesh that is a car at one end of the transformation and a mech at the other. Nothing here is ever added to or
+// removed from the scene; in the driving pose these parts are folded down to a few centimetres inside the bodywork
+// and switched off, and the transformation is them growing out of it while the car's own panels climb into place
+// around them.
 //
-// The palette is deliberately narrow: dark blued steel with lighter shoulder plates, gold filigree and one cold
-// blue light source, so the emissive core is the only saturated thing on the model and the eye goes straight to it.
-// Everything armoured shares one vertex-coloured material, which is why a rig of a hundred pieces is a dozen draws.
-const H = T.mech.height          // metres: the rig is drawn to the same height as the glTF model is normalised to
+// The division of labour with Vehicles.js is deliberate. The car's panels supply everything the eye reads as mass:
+// the bonnet becomes the chest plate, the roof becomes the hood, the flanks become the pauldrons, the wheels become
+// the hips and the knees. What is left for the rig is the frame those panels bolt onto — a pelvis, two telescoping
+// legs, two arms, a slim spine and a visored head — plus the one thing a car has no part for, the wizard's kit. So
+// the rig is drawn narrow and skeletal on purpose: it is what shows *between* the armour, and a second full torso
+// underneath the bonnet would only fight it.
+//
+// Every articulated piece is a pivot inside a mount. The mount belongs to the morph and nothing else writes to it;
+// the pivot belongs to the walk cycle and the morph never touches it. The two animations therefore compose without
+// either knowing about the other, which is why the mech can walk while it is still unfolding.
+//
+// The palette is narrow: dark blued steel with lighter plates, brass filigree and one cold blue light, so the mana
+// core is the only saturated thing on the machine and the eye goes straight to it.
+const H = T.mech.height          // metres: the machine's standing height, the same figure the camera and Combat use
 const HIP_Y = 2.32               // metres: hip joint height
 const KNEE_Y = 1.30              // metres: knee joint height
 const SHOULDER_Y = 3.36          // metres: shoulder ball height
@@ -28,9 +37,12 @@ const CADENCE = 0.13             // strides per second per m/s of walking speed 
 const IDLE_HZ = 0.45             // breathing rate when standing still
 const CORE_HZ = 0.8              // mana core pulse
 const CLOAK_SEG = 16, CLOAK_ROWS = 7
-const STEEL = 0x424956, PLATE = 0x666f80, JOINT = 0x23272f, DARK = 0x191c22, BRASS = 0xbb9a4e
+export const LIMB_STOW = new THREE.Vector3(0.55, 0.16, 0.55)   // scale of a limb collapsed into its own joint while driving
+export const STEEL = 0x424956, PLATE = 0x666f80, JOINT = 0x23272f, DARK = 0x191c22, BRASS = 0xbb9a4e
 
-const materials = () => ({
+// The mech's half of the material set. Vehicles.js merges this with the car's own materials into one Kit, so a
+// machine that is both still costs one draw call per material per moving piece.
+export const mechMaterials = () => ({
   armour: new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.82, roughness: 0.36, envMapIntensity: 1.2 }),
   gold: new THREE.MeshStandardMaterial({ color: 0xc6a251, metalness: 1, roughness: 0.26, envMapIntensity: 1.5 }),
   cloth: new THREE.MeshStandardMaterial({ color: 0x2b2050, roughness: 0.95, metalness: 0, side: THREE.DoubleSide }),
@@ -46,33 +58,50 @@ function at(geo, x, y, z, rx = 0, ry = 0, rz = 0) {
   return geo
 }
 
+// a pivot the walk cycle drives, wrapped in a mount the morph drives
+function joint(parent, x = 0, y = 0, z = 0) {
+  const mount = new THREE.Group(), pivot = new THREE.Group()
+  pivot.position.set(x, y, z)
+  mount.add(pivot)
+  parent.add(mount)
+  return { mount, pivot }
+}
+
 // ---- the rig -------------------------------------------------------------------------------------------------
 
 export class MechRig {
-  constructor() {
+  // `kit` and `mats` come from the vehicle when the rig is one half of a transforming machine; on its own it builds
+  // and flushes its own, which is what keeps it testable and usable anywhere a plain standing mech is wanted.
+  constructor({ kit = null, mats = null } = {}) {
     this.root = new THREE.Group()
-    this.mats = materials()
-    const kit = new Kit(this.mats)
+    this.mats = mats ?? mechMaterials()
+    const own = !kit
+    kit = kit ?? new Kit(this.mats)
     const box = profile(1, 1, 0.3)
+    this.mounts = {}
 
     // hips: a pelvic block with armoured skirt plates, the anchor both legs hang from
-    this.hips = new THREE.Group(); this.hips.position.y = HIP_Y; this.root.add(this.hips)
+    const hip = joint(this.root, 0, HIP_Y, 0)
+    this.mounts.hips = hip.mount; this.hips = hip.pivot
     const hp = kit.section(this.hips)
     hp.put("armour", loft(box, [
-      { z: -0.42, sx: 1.02, sy: 0.52, oy: 0.14 },
-      { z: -0.10, sx: 1.26, sy: 0.66, oy: 0.16 },
-      { z: 0.28, sx: 1.18, sy: 0.60, oy: 0.14 },
+      { z: -0.40, sx: 0.86, sy: 0.46, oy: 0.12 },
+      { z: -0.08, sx: 1.06, sy: 0.58, oy: 0.14 },
+      { z: 0.26, sx: 0.98, sy: 0.52, oy: 0.12 },
     ]), STEEL)
     for (const sx of [-1, 1]) {
-      hp.put("armour", at(panel(0.46, 0.62, 0.34, { r: 0.1 }), sx * 0.60, -0.14, -0.04, 0, 0, sx * 0.16), PLATE)
+      hp.put("armour", at(panel(0.34, 0.54, 0.30, { r: 0.1 }), sx * 0.54, -0.16, -0.04, 0, 0, sx * 0.16), PLATE)
       hp.put("armour", at(revolve([[0.001, 0], [0.20, 0.04], [0.22, 0.18], [0.16, 0.26]], 12), sx * STANCE, -0.16, 0), JOINT)
     }
-    hp.put("armour", at(panel(0.9, 0.06, 0.1, { r: 0.03 }), 0, 0.34, -0.32), BRASS)
+    hp.put("armour", at(panel(0.8, 0.06, 0.1, { r: 0.03 }), 0, 0.30, -0.28), BRASS)
 
-    // legs: thigh, then a shin that carries the foot, so the knee folds in the walk cycle
+    // legs: thigh, then a shin that carries the foot, so the knee folds in the walk cycle. The thigh's mount is
+    // what telescopes: collapsing it towards the hip joint stows the whole leg inside the chassis.
     this.legs = []
     for (const sx of [-1, 1]) {
-      const thigh = new THREE.Group(); thigh.position.set(sx * STANCE, 0, 0); this.hips.add(thigh)
+      const leg = joint(this.hips, sx * STANCE, 0, 0)
+      const thigh = leg.pivot
+      this.mounts[sx < 0 ? "legL" : "legR"] = leg.mount
       const ts = kit.section(thigh)
       // lofts sweep along z, so a limb is drawn lying down and then stood up on its end
       ts.put("armour", at(loft(box, [
@@ -98,31 +127,37 @@ export class MechRig {
       this.legs.push({ thigh, shin, side: sx })
     }
 
-    // torso: a chest that swells at the shoulders, a reactor housing on the back, a collar for the hood
-    this.torso = new THREE.Group(); this.torso.position.y = HIP_Y + 0.30; this.root.add(this.torso)
+    // torso: a slim spine and a collar rather than a chest, because the car's bonnet is the chest plate
+    const tor = joint(this.root, 0, HIP_Y + 0.30, 0)
+    this.mounts.torso = tor.mount; this.torso = tor.pivot
     const tq = kit.section(this.torso)
     tq.put("armour", loft(box, [
-      { z: -0.46, sx: 1.12, sy: 0.86, oy: 0.42 },
-      { z: -0.16, sx: 1.50, sy: 1.02, oy: 0.52 },
-      { z: 0.22, sx: 1.44, sy: 0.96, oy: 0.50 },
-      { z: 0.50, sx: 1.06, sy: 0.74, oy: 0.44 },
+      { z: -0.34, sx: 0.70, sy: 0.64, oy: 0.42 },
+      { z: -0.10, sx: 0.86, sy: 0.78, oy: 0.50 },
+      { z: 0.20, sx: 0.82, sy: 0.74, oy: 0.48 },
+      { z: 0.42, sx: 0.62, sy: 0.56, oy: 0.42 },
     ]), STEEL)
-    tq.put("armour", at(panel(0.86, 0.72, 0.30, { r: 0.12 }), 0, 0.62, 0.44), PLATE)                          // backpack
-    tq.put("armour", at(revolve([[0.16, 0], [0.20, 0.36], [0.14, 0.46]], 10), -0.30, 0.92, 0.42), JOINT)       // vents
-    tq.put("armour", at(revolve([[0.16, 0], [0.20, 0.36], [0.14, 0.46]], 10), 0.30, 0.92, 0.42), JOINT)
-    tq.put("armour", at(panel(0.5, 0.08, 0.1, { r: 0.03 }), 0, 0.18, -0.5), BRASS)
-    tq.put("armour", at(revolve([[0.30, 0], [0.34, 0.06], [0.30, 0.1]], 14), 0, 0.30, -0.34), BRASS)           // core bezel
-    this.core = new THREE.Mesh(new THREE.SphereGeometry(0.26, 14, 10), this.mats.rune)
-    this.core.position.set(0, HIP_Y + 0.60, -0.36); this.root.add(this.core)
+    tq.put("armour", at(revolve([[0.13, 0], [0.17, 0.30], [0.12, 0.40]], 10), -0.26, 0.86, 0.34), JOINT)      // vents
+    tq.put("armour", at(revolve([[0.13, 0], [0.17, 0.30], [0.12, 0.40]], 10), 0.26, 0.86, 0.34), JOINT)
+    for (const sx of [-1, 1]) tq.put("armour", at(strut(sx * 0.30, 0.86, 0, sx * 0.74, 1.02, 0, 0.09, 8), 0, 0, 0), PLATE)   // clavicles
+    tq.put("armour", at(revolve([[0.26, 0], [0.30, 0.06], [0.26, 0.1]], 14), 0, 0.28, -0.30), BRASS)          // core bezel
+
+    // the mana core: the meter made visible, and the only saturated colour on the machine
+    const cor = joint(this.root, 0, HIP_Y + 0.60, -0.36)
+    this.mounts.core = cor.mount; this.core = cor.pivot
+    const cs = kit.section(this.core)
+    cs.put("rune", new THREE.SphereGeometry(0.26, 14, 10))
+    cs.put("gold", at(new THREE.TorusGeometry(0.40, 0.03, 6, 20), 0, 0, 0, Math.PI / 2))
 
     // arms: a pauldron over a shoulder ball, an upper arm and a forearm with a fist
     this.arms = []
     for (const sx of [-1, 1]) {
-      const arm = new THREE.Group(); arm.position.set(sx * 0.78, SHOULDER_Y, 0); this.root.add(arm)
+      const a = joint(this.root, sx * 0.78, SHOULDER_Y, 0)
+      const arm = a.pivot
+      this.mounts[sx < 0 ? "armL" : "armR"] = a.mount
       const as = kit.section(arm)
       as.put("armour", at(revolve([[0.001, -0.26], [0.26, -0.2], [0.30, 0.0], [0.26, 0.18], [0.001, 0.26]], 12), 0, 0, 0), JOINT)
-      as.put("armour", at(panel(0.46, 0.42, 0.62, { r: 0.16 }), sx * 0.16, 0.10, 0, 0, 0, sx * 0.25), PLATE)   // pauldron
-      as.put("armour", at(panel(0.08, 0.3, 0.4, { r: 0.02 }), sx * 0.33, 0.14, 0), BRASS)
+      as.put("armour", at(panel(0.08, 0.3, 0.4, { r: 0.02 }), sx * 0.27, 0.10, 0), BRASS)
       as.put("armour", at(panel(0.30, 0.62, 0.30, { r: 0.1 }), sx * 0.05, -0.40, 0), STEEL)                    // upper arm
       as.put("armour", at(revolve([[0.17, -0.08], [0.19, 0], [0.17, 0.08]], 10), sx * 0.05, -0.74, 0), JOINT)  // elbow
       as.put("armour", at(panel(0.26, 0.56, 0.26, { r: 0.09 }), sx * 0.05, -1.06, 0.02), STEEL)                // forearm
@@ -130,17 +165,14 @@ export class MechRig {
       this.arms.push({ arm, side: sx })
     }
 
-    // head: a hood over a faceless visor with two lit slits, the one place the silhouette says wizard
-    this.head = new THREE.Group(); this.head.position.y = HEAD_Y; this.root.add(this.head)
+    // head: a faceless visor with two lit slits under a collar, the hood itself being the car's roof panel
+    const hd = joint(this.root, 0, HEAD_Y, 0)
+    this.mounts.head = hd.mount; this.head = hd.pivot
     const hs = kit.section(this.head)
-    hs.put("armour", at(panel(0.46, 0.40, 0.44, { r: 0.14 }), 0, 0.06, 0.02), STEEL)
-    hs.put("rune", at(panel(0.34, 0.09, 0.06, { r: 0.03 }), 0, 0.08, -0.22))
-    hs.put("cloth", at(revolve([[0.30, -0.30], [0.44, -0.22], [0.40, 0.02], [0.24, 0.34], [0.001, 0.46]], 14), 0, 0.02, 0.06))
-    hs.put("armour", at(revolve([[0.30, 0], [0.36, 0.04], [0.30, 0.08]], 14), 0, -0.26, 0.04), BRASS)          // collar ring
-    kit.build()
-
-    // shadow casting is set by Avatar, but the cloak is two-sided and would self-shadow into mud
-    this.root.traverse((o) => { if (o.isMesh && o.material === this.mats.cloth) o.castShadow = false })
+    hs.put("armour", at(panel(0.42, 0.38, 0.42, { r: 0.14 }), 0, 0.04, 0.02), STEEL)
+    hs.put("rune", at(panel(0.32, 0.09, 0.06, { r: 0.03 }), 0, 0.06, -0.21))
+    hs.put("armour", at(revolve([[0.28, 0], [0.34, 0.04], [0.28, 0.08]], 14), 0, -0.26, 0.04), BRASS)          // collar ring
+    if (own) kit.build()
     this.phase = 0
   }
 
@@ -180,39 +212,27 @@ export class MechRig {
     this.mats.rune.emissiveIntensity = (0.25 + 2.6 * mana) * pulse
     this.core.scale.setScalar(0.92 + 0.1 * mana * pulse)
   }
-
-  // the fold: the rig crouches, tucks its arms across the core and drops its head, which is the pose the flash
-  // hides at the swap and the pose it springs out of on the way back
-  fold(k) {
-    for (const { thigh, shin } of this.legs) { thigh.rotation.x = 1.25 * k; shin.rotation.x = -2.1 * k }
-    for (const { arm, side } of this.arms) { arm.rotation.x = -1.5 * k; arm.rotation.z = side * (0.1 + 1.0 * k) }
-    this.hips.position.y = HIP_Y - 0.95 * k
-    this.torso.position.y = HIP_Y + 0.30 - 1.0 * k
-    this.torso.rotation.x = 0.7 * k
-    this.head.position.y = HEAD_Y - 1.15 * k
-    this.head.rotation.x = 0.8 * k
-    this.core.position.y = HIP_Y + 0.60 - 1.0 * k
-  }
 }
 
 // ---- the wizard's kit ----------------------------------------------------------------------------------------
 
-// A cloak, a floating staff and (when the body underneath has no core of its own) a mana light. The staff is held
-// by nothing on purpose: a wizard mech should be visibly cheating at physics, and it also sidesteps having to bind
-// anything to the glTF skeleton's hand bone, which would break the moment the model is swapped.
+// A cloak and a telekinetically floating staff, and a mana light for a body that has none of its own. The staff is
+// held by nothing on purpose: a wizard mech should be visibly cheating at physics. Like the rig, every piece is a
+// pivot inside a mount, so the morph can stow the lot inside a car boot while the float and the swing carry on.
 const STAFF_LEN = 2.6            // metres
 const STAFF_BOB = 0.12           // metres of float
 const STAFF_HZ = 0.55
 
 export class WizardKit {
-  constructor({ cloak = true, core = false, scale = 1, mats = null } = {}) {
+  constructor({ cloak = true, core = false, scale = 1, mats = null, kit = null } = {}) {
     this.root = new THREE.Group()
-    this.mats = mats ?? materials()
-    const kit = new Kit(this.mats)
+    this.mats = mats ?? mechMaterials()
+    const own = !kit
+    kit = kit ?? new Kit(this.mats)
+    this.mounts = {}
 
-    this.staff = new THREE.Group()
-    this.staff.position.set(1.05 * scale, 2.3 * scale, -0.1 * scale)
-    this.root.add(this.staff)
+    const stf = joint(this.root, 1.05 * scale, 2.3 * scale, -0.1 * scale)
+    this.mounts.staff = stf.mount; this.staff = stf.pivot
     const st = kit.section(this.staff)
     st.put("armour", at(revolve([[0.045, -STAFF_LEN / 2], [0.055, -STAFF_LEN / 2 + 0.2], [0.05, STAFF_LEN / 2 - 0.5], [0.07, STAFF_LEN / 2 - 0.35], [0.05, STAFF_LEN / 2 - 0.2]], 10), 0, 0, 0), DARK)
     st.put("gold", at(revolve([[0.08, 0], [0.11, 0.05], [0.11, 0.14], [0.08, 0.19]], 12), 0, STAFF_LEN / 2 - 0.34, 0))
@@ -227,23 +247,23 @@ export class WizardKit {
     // the cloak: a wrapped sheet with a rippled hem, hung off the collar and swung by the walk
     this.cloak = null
     if (cloak) {
-      this.cloak = new THREE.Group()
-      this.cloak.position.set(0, 3.30 * scale, 0.18 * scale)
-      this.root.add(this.cloak)
-      this.cloak.add(new THREE.Mesh(cloakGeometry(), this.mats.cloth))
-      this.cloak.children[0].castShadow = false
+      const clk = joint(this.root, 0, 3.30 * scale, 0.18 * scale)
+      this.mounts.cloak = clk.mount; this.cloak = clk.pivot
+      const sheet = new THREE.Mesh(cloakGeometry(), this.mats.cloth)
+      sheet.castShadow = false                              // two-sided cloth self-shadows into mud
+      sheet.userData.noShadow = true
+      this.cloak.add(sheet)
     }
 
     this.core = null
     if (core) {
-      this.core = new THREE.Mesh(new THREE.SphereGeometry(0.3 * scale, 14, 10), this.mats.rune)
-      this.core.position.set(0, 2.55 * scale, -0.62 * scale)
-      this.root.add(this.core)
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.46 * scale, 0.035 * scale, 6, 20), this.mats.gold)
-      this.core.add(ring)
-      this.ring = ring
+      const cor = joint(this.root, 0, 2.55 * scale, -0.62 * scale)
+      this.mounts.core = cor.mount; this.core = cor.pivot
+      const cs = kit.section(this.core)
+      cs.put("rune", new THREE.SphereGeometry(0.3 * scale, 14, 10))
+      cs.put("gold", at(new THREE.TorusGeometry(0.46 * scale, 0.035 * scale, 6, 20), 0, 0, 0, Math.PI / 2))
     }
-    kit.build()
+    if (own) kit.build()
     this.t = 0
   }
 
@@ -255,20 +275,12 @@ export class WizardKit {
     this.staff.rotation.y = t * 0.5
     this.staff.rotation.z = -0.18 + Math.sin(t * 1.3) * 0.06
     this.crystal.rotation.y = -t * 1.6
-    if (this.ring) { this.ring.rotation.x = t * 1.1; this.ring.rotation.y = t * 0.7 }
-    if (this.core) this.core.scale.setScalar(0.9 + 0.12 * mana * pulse)
+    if (this.core) { this.core.scale.setScalar(0.9 + 0.12 * mana * pulse); this.core.rotation.set(t * 0.4, t * 0.7, 0) }
     if (this.cloak) {
       const sway = Math.min(1, Math.abs(speed) / T.mech.walk)
       this.cloak.rotation.x = -0.05 - 0.25 * sway + (airborne ? 0.3 : 0) + Math.sin(t * 2.1) * 0.03
       this.cloak.rotation.z = Math.sin(t * 1.7) * 0.04 * (1 - sway)
     }
-  }
-
-  fold(k) {
-    this.staff.position.set(1.05 * (1 - 0.8 * k), 2.3 - 0.9 * k, -0.1)
-    this.staff.rotation.z = -0.18 - 1.2 * k
-    if (this.cloak) { this.cloak.scale.setScalar(1 - 0.55 * k); this.cloak.position.y = 3.30 - 1.1 * k }
-    if (this.core) this.core.position.set(0, 2.55 - 0.8 * k, -0.62 + 0.3 * k)
   }
 }
 

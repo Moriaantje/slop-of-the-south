@@ -1,18 +1,34 @@
 module Game
-  # Every destructible inside a buffered line — the ground under a dragon's breath — with the hit points the client
-  # gives the same object (Destructibles.js), so the server's verdicts land on things the browser knows.
+  # Every destructible inside a piece of ground — the strip under a dragon's breath, or the disc a fireball bursts
+  # over — with the hit points the client gives the same object (Destructibles.js), so the server's verdicts land on
+  # things the browser knows. Both shapes go through the same pair of queries and differ only in the PostGIS geometry
+  # the CTE hands them: a buffered line for the breath, a buffered point for the burst. That matters because the two
+  # must agree about what counts as hit — a tree half under the flame and half under the blast is one tree with one
+  # key, and a rule that lived in two places would eventually disagree with itself about which.
   module Corridor
     POINT_MAX = { "t" => 30.0, "l" => 12.0, "g" => 20.0, "s" => 6.0 }.freeze
 
     # (x0, z0) → (x1, z1) in game units, half_w metres to each side; returns [[key, max_hp], ...]
     def self.objects(x0, z0, x1, z1, half_w)
-      conn = ActiveRecord::Base.connection
       ax, ay = World.to_rd(x0, z0)
       bx, by = World.to_rd(x1, z1)
-      with = <<~SQL
-        WITH c AS (SELECT line, ST_Buffer(line, #{half_w.to_f}, 'endcap=flat') AS corr
-                   FROM (SELECT ST_SetSRID(ST_MakeLine(ST_MakePoint(#{ax.to_f}, #{ay.to_f}), ST_MakePoint(#{bx.to_f}, #{by.to_f})), 28992) AS line) l)
+      within(<<~SQL)
+        WITH c AS (SELECT ST_Buffer(ST_SetSRID(ST_MakeLine(ST_MakePoint(#{ax.to_f}, #{ay.to_f}), ST_MakePoint(#{bx.to_f}, #{by.to_f})), 28992),
+                                    #{half_w.to_f}, 'endcap=flat') AS corr)
       SQL
+    end
+
+    # everything within r metres of (x, z) in game units: what a burst sets alight
+    def self.blast(x, z, r)
+      cx, cy = World.to_rd(x, z)
+      within(<<~SQL)
+        WITH c AS (SELECT ST_Buffer(ST_SetSRID(ST_MakePoint(#{cx.to_f}, #{cy.to_f}), 28992), #{r.to_f}) AS corr)
+      SQL
+    end
+
+    # `with` defines a single-row CTE `c` with a column `corr`: the RD polygon to collect inside
+    def self.within(with)
+      conn = ActiveRecord::Base.connection
       # buildings, with the bag3d-wins rule of Building.in_tile; parts with a LoD2.2 mesh take the mesh key
       buildings = conn.select_rows(<<~SQL).map do |id, has_mesh, bag, area|
         #{with}
@@ -42,6 +58,7 @@ module Game
       end
       buildings + points
     end
+    private_class_method :within
 
     # Destructibles.js buildingHp: clamp(round(60 + 1.2 · area), 80, 800)
     def self.building_hp(area) = (60 + 1.2 * area).round.clamp(80, 800).to_f

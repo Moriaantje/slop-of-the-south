@@ -11,9 +11,7 @@ module Game
     HEAL_IDLE_MS  = 300_000             # an empty room heals its world after five minutes
     DISCOVER_R    = 150.0               # metres from a hub centre that count as having been there
     HUB_R         = 60.0                # inside a hub: fast regeneration, and the hub becomes your respawn
-    HUB_REGEN     = 10.0                # hp per second inside a hub
-    FIELD_REGEN   = 1.0                 # hp per second elsewhere, once unhurt for FIELD_REGEN_DELAY_MS
-    FIELD_REGEN_DELAY_MS = 5_000
+    FIELD_REGEN_DELAY_MS = 5_000        # the regeneration rates themselves are per player now: Game::Progression
     DISCOVER_XP   = 15
 
     @managers = {}
@@ -53,7 +51,20 @@ module Game
       return @quests if defined?(@quests)
       @quests = @quests_arg == :default ? Quests::Board.new(hubs) : @quests_arg
       @quests.on_change = ->(s) { @you_dirty << s.id } if @quests.respond_to?(:on_change=)
+      # the people at a lair talk about what lives there; the board duck-types on name / awake? / alive?
+      @quests.dragons = ->(lair_key) { actors.respond_to?(:dragons) ? actors.dragons.find { _1.lair.key == lair_key } : nil } if @quests.respond_to?(:dragons=)
       @quests
+    end
+
+    # A skill point spent. Progression owns every rule here — the level you need, the prerequisites, whether you can
+    # afford it — and answers with the whole block, so the client never has to work out what it now has.
+    def skill(player_id, key, now = Game.now_ms)
+      msg = @mutex.synchronize do
+        s = @sessions[player_id] or next({ type: "skill", ok: false, reason: "player" })
+        Progression.unlock(s, key.to_s)
+      end
+      @publish_to.call(player_id, msg.merge(now:))
+      msg
     end
 
     # returns the `sync` payload for the new subscriber; the same player in several tabs is counted once
@@ -145,15 +156,27 @@ module Game
 
     # Dragon fire (or anything else that hurts): takes hp unless the player holds a shield, tells the room so every
     # screen shows it, and kills at zero. Call under the mutex from a tick, or on its own otherwise.
+    # A shield used to be all or nothing. It now blocks the share the player's own stats say it blocks, and a
+    # reflecting shield sends part of what it stopped back at whatever is nearest — which is the only way an ability
+    # that costs a skill point can be felt in the one situation it is for.
     def burn(session, damage, x, z, now, room_msgs, personal_msgs)
-      shielded = session.shield
-      unless shielded
-        session.hp = [ session.hp - damage, 0 ].max
+      st = session.stats
+      blocked = session.shield ? damage * st[:shield_block] : 0.0
+      taken = damage - blocked
+      if taken.positive?
+        session.hp = [ session.hp - taken, 0 ].max
         session.hurt_at = now
         session.changed = true
         @you_dirty << session.id
       end
-      room_msgs << { type: "burn", id: session.id, x: x.round(1), z: z.round(1), damage: shielded ? 0 : damage, shielded: }
+      room_msgs << { type: "burn", id: session.id, x: x.round(1), z: z.round(1), damage: taken.round(1), shielded: session.shield }
+      quests.on_hurt(session, taken, now, personal_msgs) if quests.respond_to?(:on_hurt)   # a fragile load does not survive a scorching
+      if blocked.positive? && st[:shield_reflect].positive? && actors.respond_to?(:strike) && session.x
+        back = (blocked * st[:shield_reflect]).round(1)
+        near = actors.snapshot(now).min_by { Math.hypot(_1[:x] - session.x, _1[:z] - session.z) }
+        hit = near && actors.strike(session, near[:id], back, Progression::REFLECT_KIND, now)
+        room_msgs << hit.merge(reflect: true) if hit.is_a?(Hash)
+      end
       die(session, now, room_msgs, personal_msgs) unless session.alive?
     end
 
@@ -168,7 +191,7 @@ module Game
           (result[:kills] || []).each { |lair_key, ids| quests&.on_kill(lair_key, ids, now, @sessions, personal_msgs) }
         end
         @world.rebuild(now).each { @dirty[_1.key] = _1 }                  # what nobody hit for a while stands again
-        @sessions.each_value { |s| regen(s, now); discover(s, now, personal_msgs) }
+        @sessions.each_value { |s| regen(s, now); discover(s, now, personal_msgs); (up = s.level_up) && personal_msgs << [ s.id, up ] }
         quests&.tick(now, @sessions, personal_msgs)
         @you_dirty.each { |id| (s = @sessions[id]) && personal_msgs << [ id, { type: "you" }.merge(status(s)) ] }
         @you_dirty.clear
@@ -192,13 +215,14 @@ module Game
     def stop = @thread&.kill
 
     def you(s)
-      status(s).merge(id: s.id, name: s.name, vehicle: s.vehicle, max_hp: Session::MAX_HP, discovered: s.discovered.to_a,
+      status(s).merge(s.progress).merge(id: s.id, name: s.name, vehicle: s.vehicle, discovered: s.discovered.to_a, skills: Progression.catalogue,
                       spawn: respawn_for(s), next_action_at: s.next_action_at)
     end
 
     private
 
-    def status(s) = { hp: s.hp.round(1), gold: s.gold, xp: s.xp, level: s.level }
+    # rides every tick, so it carries only what changes: s.brief is level, max_hp and the points still to spend
+    def status(s) = { hp: s.hp.round(1), gold: s.gold, xp: s.xp }.merge(s.brief)
 
     def respawn_for(s)
       hub = s.last_hub_key && hubs[s.last_hub_key]
@@ -206,11 +230,11 @@ module Game
     end
 
     def regen(s, now)
-      return unless s.alive? && s.hp < Session::MAX_HP && s.x
+      return unless s.alive? && s.hp < s.max_hp && s.x
       near = near_hub(s, HUB_R)
-      rate = near ? HUB_REGEN : (s.hurt_at.nil? || now - s.hurt_at >= FIELD_REGEN_DELAY_MS ? FIELD_REGEN : 0)
+      rate = near ? s.stats[:hub_regen] : (s.hurt_at.nil? || now - s.hurt_at >= FIELD_REGEN_DELAY_MS ? s.stats[:field_regen] : 0)
       return if rate.zero?
-      s.hp = [ s.hp + rate * TICK_S, Session::MAX_HP ].min
+      s.hp = [ s.hp + rate * TICK_S, s.max_hp ].min
       s.changed = true
       @you_dirty << s.id
     end
@@ -242,7 +266,7 @@ module Game
 
     def die(s, now, room_msgs, personal_msgs)
       spawn = respawn_for(s)
-      s.hp = Session::MAX_HP
+      s.hp = s.max_hp
       s.hurt_at = nil
       s.changed = true
       @you_dirty << s.id

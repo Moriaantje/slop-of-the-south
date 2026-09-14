@@ -2,6 +2,7 @@ import * as THREE from "three"
 import { TUNING as T, lerpAngle, wrapAngle } from "game/Tuning"
 import { makeBeacon, placeBeacon, showBeacon, disposeBeacon } from "game/Beacon"
 import { FireCone } from "game/FireCone"
+import { activeCombat } from "game/Combat"
 import { Blob } from "game/Shadows"
 import { pbr } from "game/Textures"
 
@@ -15,7 +16,19 @@ import { pbr } from "game/Textures"
 // sky, visible from the next village. It breathes a fire cone with a sprite stream (the jaw opens), carries a name
 // beacon and a contact shadow, and sinks to the ground when it dies. `nearest(x, z, yaw)` names the dragon the
 // mech is aiming at; `struck(target, kind)` reports a spell hit.
+//
+// The server's state is also the fight's script, and every state in it is drawn as something the player can read a
+// second before it costs them: `aim` rears the head back and tracks you, `tell` hangs and gathers a gob of light at
+// the lips, `breathe` opens the throat, `vulnerable` is the head down and the wings half-folded — hit it now — and
+// `stagger` is a jolt with the aim thrown off it. The same list carries the fireballs the dragon has in the air and
+// the ground they set alight; both go straight through Combat, which is where every projectile in the game lives,
+// so a dragon's shot and a wizard's shot shed the same embers out of the same pool.
 const DELAY_MS = 250, EXTRAPOLATE_MS = 1000, HIDE_DEAD_MS = 8000
+// what the head does per state: how far the jaw drops, and how far the head rears back (negative) or droops
+const POSE = { aim: [0.22, -0.34], tell: [0.5, -0.2], breathe: [0.62, -0.05], vulnerable: [0.3, 0.42], stagger: [0.35, 0.22], dead: [0.5, 0.5] }
+const REST_POSE = [0.04, 0]
+// what Game::Dragon::STRIKE_CAP allows per spell, mirrored so the predicted health bar never overshoots the server's
+const STRIKE_CAP = { fireball: 60, lightning: 45 }
 // the serpent body: segment count, spacing along the path, radius behind the head → the tail tip, history length
 const SEGMENTS = 32, SPACING = 3.4, R0 = 2.4, R1 = 0.3, ANCHOR = 4, HISTORY = 700, WING_AT = 4
 const bodyGeo = (() => { const g = new THREE.SphereGeometry(1, 14, 10); const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 5, uv.getY(i) * 2.5); g.__shared = true; return g })()
@@ -60,28 +73,65 @@ function makeHead() {
 }
 
 export class Dragons {
-  constructor({ scene, assets, effects, session, send, heightAt, hud = null }) {
+  constructor({ scene, assets, effects, session, send, heightAt, hud = null, combat = null }) {
     this.scene = scene; this.assets = assets; this.effects = effects; this.session = session
     this.send = send; this.heightAt = heightAt; this.hud = hud
+    this.givenCombat = combat
     this.list = new Map()          // id → dragon
     this.fireAcc = 0
     this.count = 0
   }
 
-  // list: snapshots; now: server ms of the message
+  // One projectile system, two owners: the dragons put their fireballs through the same Combat the player's weapons
+  // use. game.js may hand it over; until it does, Combat registers itself when it is built and this finds it there.
+  get combat() { return this.givenCombat ?? activeCombat() }
+
+  // list: snapshots — dragons, the fireballs they have in the air, and the ground those set alight; now: server ms
   receive(list, now) {
     const t = performance.now() - Math.max(0, this.session.now() - now)      // the message's age, in our clock
     for (const s of list) {
+      if (s.kind === "shot") { this.shot(s); continue }
+      if (s.kind === "fire") { this.ground(s); continue }
       let d = this.list.get(s.id)
       if (!d) { d = this.spawn(s); this.list.set(s.id, d) }
-      d.name = s.name; d.lair = s.lair; d.max = s.max; d.target = s.target
-      if (s.state !== d.state) { d.prevState = d.state; d.state = s.state; d.stateAt = performance.now() }
+      d.name = s.name; d.lair = s.lair; d.max = s.max; d.target = s.target; d.enraged = !!s.enraged
+      if (s.state !== d.state) this.entered(d, s.state)
       d.hp = s.hp
       d.buf.push({ t, x: s.x, y: s.y, z: s.z, yaw: s.yaw, pitch: s.pitch, speed: s.speed })
       if (d.buf.length > 16) d.buf.shift()
       d.lastSeen = performance.now()
     }
     this.count = this.list.size
+  }
+
+  // a state change is a beat of the fight, not just a label: the jolt of a stagger starts here
+  entered(d, state) {
+    d.prevState = d.state
+    d.state = state
+    d.stateAt = performance.now()
+    if (state === "stagger") { d.jolt = 1; d.kick = (Math.random() < 0.5 ? -1 : 1) * 0.55 }
+  }
+
+  // A fireball the server says is in the air. The whole flight is in the message, so there is nothing to predict;
+  // what has to happen here is the clock. Dragons are drawn DELAY_MS behind their samples, and the shot must leave
+  // the mouth of the dragon we are actually drawing rather than the one the server has already moved on from, so
+  // the same delay comes off the shot's age. Repeats are ignored downstream, by id.
+  shot(s) {
+    const combat = this.combat
+    if (!combat) return
+    const age = (this.session.now() - s.t0 - DELAY_MS) / 1000
+    const ttl = (s.t1 - s.t0) / 1000 - age
+    if (ttl < -1) return                                                     // it burst a while ago: nothing to draw
+    combat.dragonShot({ id: s.id, x: s.x, y: s.y, z: s.z, vx: s.vx, vy: s.vy, vz: s.vz, g: s.g, age, ttl,
+                        ix: s.ix, iy: s.iy, iz: s.iz, r: s.r, flavour: s.flavour })
+  }
+
+  // ground a burst set alight, for as long as the server says it has left to burn
+  ground(s) {
+    const combat = this.combat
+    const left = (s.until - this.session.now()) / 1000
+    if (!combat || left <= 0.1) return
+    combat.groundFire(s.id, s.x, s.z, s.r, left, s.flavour ?? "castle")
   }
 
   spawn(s) {
@@ -114,9 +164,12 @@ export class Dragons {
       return w
     })
     this.scene.add(body)
-    return { id: s.id, name: s.name, lair: s.lair, state: s.state, prevState: null, stateAt: 0, hp: s.hp, max: s.max, target: s.target,
-      buf: [], lastSeen: 0, root, head, jaw, wings, flap: 0, cone: new FireCone(mouth), beacon: makeBeacon(this.scene, 0xff6a3a),
+    return { id: s.id, name: s.name, lair: s.lair, flavour: s.flavour ?? "castle", state: s.state, prevState: null, stateAt: 0,
+      hp: s.hp, max: s.max, target: s.target, enraged: !!s.enraged,
+      buf: [], lastSeen: 0, root, head, jaw, wings, flap: 0, cone: new FireCone(mouth, s.flavour ?? "castle"),
+      beacon: makeBeacon(this.scene, 0xff6a3a), mouth,
       shadow: new Blob(this.scene, 8, 14), x: s.x, y: s.y, z: s.z, yaw: s.yaw, speed: 0, roll: 0, alive: s.state !== "dead", sink: 0,
+      rear: 0, jolt: 0, kick: 0, gather: 0,
       body, segs, path: [], pathLen: [], t: Math.random() * 10 }
   }
 
@@ -156,9 +209,12 @@ export class Dragons {
       seg.lookAt(px, py, pz)
       seg.visible = d.root.visible
       if (i === WING_AT) {                                                            // the wings ride this segment, beating or folded
+        // a spent or winded dragon labours: the beat halves and the wings hang lower, which is half the reason you
+        // can tell at a glance that now is the moment to hit it
         const flying = d.state !== "perch" && d.state !== "dead"
-        d.flap += dt * (flying ? 1.1 : 0.25) * Math.PI * 2
-        const beat = flying ? 0.15 + 0.5 * Math.sin(d.flap) : 1.25 + 0.05 * Math.sin(d.flap)
+        const spent = d.state === "vulnerable" || d.state === "stagger"
+        d.flap += dt * (flying ? (spent ? 0.5 : 1.1) : 0.25) * Math.PI * 2
+        const beat = flying ? (spent ? 0.45 : 0.15) + (spent ? 0.3 : 0.5) * Math.sin(d.flap) : 1.25 + 0.05 * Math.sin(d.flap)
         for (const w of d.wings) {
           w.position.set(sx, sy + 0.8, sz); w.quaternion.copy(seg.quaternion)
           w.rotateZ(-Math.sign(w.scale.x) * beat)
@@ -169,21 +225,25 @@ export class Dragons {
     }
   }
 
-  // a `strike` verdict from the server: the room-wide hp
+  // a `strike` verdict from the server: the room-wide hp, and whether that was the hit that broke its concentration
   strike(msg) {
     const d = this.list.get(msg.dragon_id)
     if (!d) return
     d.hp = msg.hp
+    if (msg.staggered) { this.entered(d, "stagger"); this.effects.flash(d.x, d.y, d.z, 8); this.effects.shake(0.25) }
     if (msg.by === this.session.playerId) { this.hud?.hit?.(); this.effects.flash(d.x, d.y, d.z, 3) }
   }
 
-  // a spell of ours reached a dragon: tell the server, predict the hp
+  // A spell of ours reached a dragon: tell the server, and predict the hp it will come back with. The prediction is
+  // capped at what Game::Dragon will actually allow per spell, not at what the spell claims to do — a bar that runs
+  // ahead of the server and then jumps back up is worse than no bar.
   struck(target, kind) {
     const d = this.list.get(target.id)
     if (!d || !d.alive) return
-    const dmg = kind === "fireball" ? T.spells.fireball.dmg : T.spells.lightning.dmg
+    const claimed = kind === "fireball" ? T.spells.fireball.dmg : T.spells.lightning.dmg
+    const dmg = Math.min(claimed, STRIKE_CAP[kind] ?? claimed)
     d.hp = Math.max(0, d.hp - dmg)
-    this.send("strike", { dragon_id: d.id, damage: dmg, kind })
+    this.send("strike", { dragon_id: d.id, damage: claimed, kind })
     this.hud?.hit?.()
   }
 
@@ -203,7 +263,7 @@ export class Dragons {
 
   update(local, camera, dt, darkness = 0) {
     const now = performance.now(), renderT = now - DELAY_MS
-    let breathStrength = 0, nearestBreather = null, nearestD = Infinity
+    let nearestBreather = null, nearestD = Infinity, nearestCharger = null, chargerD = Infinity
     for (const d of this.list.values()) {
       const b = d.buf
       if (!b.length) continue
@@ -223,32 +283,42 @@ export class Dragons {
       }
       const yawRate = dt > 0 ? wrapAngle(yaw - d.yaw) / dt : 0
       d.roll += (THREE.MathUtils.clamp(-yawRate * 0.8, -0.7, 0.7) - d.roll) * Math.min(1, dt * 4)
+      // a flinch: a shudder through the whole body that decays over about half a second
+      d.jolt = Math.max(0, d.jolt - dt * 2.2)
+      d.kick *= 1 - Math.min(1, dt * 3)
+      const shudder = d.jolt * d.jolt * Math.sin(now * 0.045) * 0.22
       d.alive = d.state !== "dead"
       if (!d.alive) { d.sink = Math.min(1, d.sink + dt / 6); y = Math.max(this.heightAt(x, z) + 2, y - d.sink * d.sink * 60) }   // a dead dragon comes down
       else d.sink = 0
       d.x = x; d.y = y; d.z = z; d.yaw = yaw; d.speed = c.speed
       d.root.position.set(x, y, z)
       d.root.rotation.set(0, yaw, 0)
-      d.root.rotateX(-pitch); d.root.rotateZ(d.roll)
-      d.jaw.rotation.x += ((d.state === "breathe" ? 0.55 : 0.04) - d.jaw.rotation.x) * Math.min(1, dt * 6)
+      d.root.rotateX(-pitch + shudder); d.root.rotateZ(d.roll + d.kick + shudder)
+      // the head tells the story: jaw and rear angle per state, eased so nothing snaps into place
+      const [wantJaw, wantRear] = POSE[d.state] ?? REST_POSE
+      d.jaw.rotation.x += (wantJaw - d.jaw.rotation.x) * Math.min(1, dt * 6)
+      d.rear += (wantRear - d.rear) * Math.min(1, dt * 5)
+      d.head.rotation.x = d.rear + shudder * 1.5
       this.serpent(d, yaw, pitch, dt)
-      // breath: the cone from the mouth, the strongest one drives the shared shader; the nearest streams sprites
-      const breathing = d.state === "breathe"
-      d.cone.set(breathing, dt)
-      if (d.cone.k > 0.02) breathStrength = Math.max(breathStrength, d.cone.k)
-      if (breathing) { const dist = Math.hypot(x - local.x, z - local.z); if (dist < nearestD) { nearestD = dist; nearestBreather = d } }
+      // breath: the cone from the mouth, glowing through the wind-up and open through the breath
+      const breathing = d.state === "breathe", charging = d.state === "tell"
+      d.cone.set({ breathing, charging }, dt)
+      const dist = Math.hypot(x - local.x, z - local.z)
+      if (breathing && dist < nearestD) { nearestD = dist; nearestBreather = d }
+      if (charging && dist < chargerD) { chargerD = dist; nearestCharger = d }
       // dead: hidden after the death clip, no beacon
       const dead = d.state === "dead", hide = dead && now - d.stateAt > HIDE_DEAD_MS
       d.root.visible = !hide
       d.body.visible = !hide
       showBeacon(d.beacon, !dead)
-      if (!dead) placeBeacon(d.beacon, x, y, z, `${d.name} ${Math.round(d.hp)}♥`, local, camera)
+      if (!dead) placeBeacon(d.beacon, x, y, z, `${d.name} ${Math.round(d.hp)}♥${d.enraged ? " · razend" : ""}`, local, camera)
       const g = this.heightAt(x, z)
       d.shadow.place(x, g, z, yaw, Math.max(0, y - g), darkness)
       d.shadow.mesh.visible = !hide && d.shadow.mesh.visible
     }
-    FireCone.tick(dt, breathStrength)
+    FireCone.tick(dt)
     if (nearestBreather) this.stream(nearestBreather, dt)
+    if (nearestCharger) this.gather(nearestCharger, dt)
   }
 
   // sprites down the breath of the nearest breathing dragon
@@ -263,7 +333,33 @@ export class Dragons {
     }
   }
 
+  // the tell: sparks pulled inwards towards the lips, the opposite of the breath, so the wind-up reads as a
+  // gathering rather than a leak
+  gather(d, dt) {
+    d.gather += dt * 22
+    const fx = -Math.sin(d.yaw), fz = -Math.cos(d.yaw)
+    const mx = d.x + fx * 8, my = d.y - 0.6, mz = d.z + fz * 8
+    while (d.gather >= 1) {
+      d.gather -= 1
+      const a = Math.random() * Math.PI * 2, r = 5 + Math.random() * 7, life = 0.45
+      const ox = Math.cos(a) * r, oy = (Math.random() - 0.5) * 2 * r, oz = Math.sin(a) * r
+      this.effects.fire.emit(mx + ox, my + oy, mz + oz, -ox / life, -oy / life, -oz / life, life, 1.6, 0.2, 0.85)
+    }
+  }
+
   // for the HUD: the dragon the player is aiming at, or the nearest awake one within 400 m
+  // The next link a chained bolt walks to: the nearest living dragon to the last hit that this bolt has not already
+  // struck. Range is lightning's own, so a chain cannot reach further than the spell that started it.
+  nextInChain(from, hit, range = T.spells.lightning.range) {
+    let best = null, bestD = range
+    for (const d of this.list.values()) {
+      if (!d.alive || hit.has(d.id)) continue
+      const dist = Math.hypot(d.x - from.x, d.z - from.z)
+      if (dist < bestD) { bestD = dist; best = d }
+    }
+    return best
+  }
+
   aimed(local) {
     const d = this.nearest(local.x, local.z, local.yaw)
     if (d) return d

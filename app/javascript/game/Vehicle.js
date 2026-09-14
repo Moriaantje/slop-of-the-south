@@ -1,6 +1,7 @@
 import * as THREE from "three"
 import { TUNING as T, expDamp } from "game/Tuning"
 import { Suspension } from "game/Suspension"
+import { stat } from "game/Skills"
 import { makeVehicleMesh } from "game/Vehicles"
 
 // Arcade car. yaw = 0 faces north (-z); positive yaw turns left. Velocity lives in the body frame: `speed` along the
@@ -12,7 +13,21 @@ import { makeVehicleMesh } from "game/Vehicles"
 // the nitro meter; road pads refill it. The frame runs integrate() (input → speed, heading, position), lets Combat
 // push the car out of whatever it hit, then settle() (suspension: terrain contact and body attitude). The vehicle
 // spec (Vehicles.js) sets the size, the physics constants and the mesh; setSpec swaps all of it in place.
+//
+// Neither pedal is a switch. The drive the engine actually puts down and the pressure in the brake line each take
+// their own moment to build and their own, quicker moment to let go, so a standing start is a shove arriving rather
+// than a number appearing and lifting off coasts instead of falling straight onto the drag curve. None of it changes
+// where the car ends up — at a steady throttle the torque is one and the force balance is exactly what it always was
+// — it changes the first third of a second, which is the part the hands feel. Leaving the ground and arriving back
+// are told to the suspension, which is where a landing belongs: the springs compress and the nose dips in proportion
+// to the fall instead of the car simply being somewhere lower next frame. The landing is also published as a count
+// and a speed so the dust and the camera can find it without anyone having to wire an event through.
 const SUBSTEP = 1 / 120
+const THROTTLE_ON = 7.5        // /s: how fast the engine takes up the throttle — the onset a standing start needs
+const THROTTLE_OFF = 11        // /s: and lets it go again, which is quicker than it builds
+const BRAKE_ON = 13            // /s: pressure builds in the line
+const BRAKE_OFF = 17           // /s: and releases faster
+const LAND_DUST = 4            // m/s of touchdown below which a landing is not worth any dust or any jolt
 
 export class Vehicle {
   constructor(spawn, spec) {
@@ -44,7 +59,7 @@ export class Vehicle {
     this.lights = this.mesh.userData.lights
     this.susp = new Suspension(this.mesh)
     for (const spot of this.spots) { spot.position.set(spot.target.position.x / 0.7, 0.7, -spec.length / 2 + 0.1); this.mesh.add(spot, spot.target) }
-    if (old) { this.speed = 0; this.lateral = 0; this.vx = 0; this.vz = 0; this.mesh.position.copy(old.position); this.mesh.rotation.copy(old.rotation) }
+    if (old) { this.speed = 0; this.lateral = 0; this.vx = 0; this.vz = 0; this.torque = 0; this.brakeP = 0; this.mesh.position.copy(old.position); this.mesh.rotation.copy(old.rotation) }
     this.setNight(this.darkness)
     return old
   }
@@ -69,14 +84,16 @@ export class Vehicle {
     this.drifting = false; this.driftDir = 0; this.driftMild = false; this.driftT = 0; this.chargeLevel = 0
     this.boosting = false; this.burstT = 0; this.boostPower = 0
     this.accLong = 0; this.accLat = 0; this.wheelAngle = 0
+    this.torque = 0; this.brakeP = 0                                    // the drive actually put down, and brake pressure
     this.vy = null; this.airY = 0; this.landed = false                 // airborne: vertical speed and height, null on the ground
+    this.landT ??= 0; this.landImpact = 0                               // landings so far and the last one's speed (VehicleFx, the camera)
     this.kickX = 0; this.kickZ = 0                                      // knockback, world m/s, dies away in a second
     this._dt = 1 / 60; this._speedOut = 0
     this.susp.reset()
   }
 
   // leave the ground with vertical speed v (the monster truck's trick, and the hop an explosion gives)
-  jump(v) { if (this.vy === null) { this.vy = v; this.airY = this.y } }
+  jump(v) { if (this.vy === null) { this.vy = v; this.airY = this.y; this.susp.launch(v) } }
 
   kick(x, z) { this.kickX += x; this.kickZ += z }
 
@@ -107,19 +124,24 @@ export class Vehicle {
     const wx = f.x * this.speed + rx * this.lateral, wz = f.z * this.speed + rz * this.lateral   // world velocity
 
     this.updateBoost(h, input)
-    const cap = this.maxSpeed * (1 + T.boost.speedBonus * this.boostPower)
+    // the spec's top speed is set once, but a skill point can be spent later: read the multiplier here, not in setSpec
+    const top = this.maxSpeed * stat("drive_speed")
+    const cap = top * (1 + T.boost.speedBonus * this.boostPower)
     const accel = this.accel * (1 + T.boost.accelBonus * this.boostPower)
 
-    // longitudinal
+    // longitudinal: the pedals have a rise time, so the acceleration has an onset and a fall-off rather than a step
     let v = this.speed
-    const drag = 0.35 * v * Math.abs(v) / this.maxSpeed + 0.8 * Math.sign(v)
-    let a = input.throttle * accel - drag
-    if (input.brake) a -= v > 0.5 ? this.brakeForce : this.accel * 0.6            // brake, then reverse
+    const thr = input.throttle, brk = input.brake ? 1 : 0
+    this.torque = expDamp(this.torque, thr, thr > this.torque ? THROTTLE_ON : THROTTLE_OFF, h)
+    this.brakeP = expDamp(this.brakeP, brk, brk > this.brakeP ? BRAKE_ON : BRAKE_OFF, h)
+    const drag = 0.35 * v * Math.abs(v) / top + 0.8 * Math.sign(v)
+    let a = this.torque * accel - drag
+    if (this.brakeP > 0.002) a -= this.brakeP * (v > 0.5 ? this.brakeForce : this.accel * 0.6)   // brake, then reverse
     if (input.handbrake) a -= (this.drifting ? D.handbrakeDecel : 12) * Math.sign(v)
     if (this.drifting) a -= D.slideDrag * Math.sign(v)
     v += a * h
     if (v > cap) v = expDamp(v, cap, T.boost.overspeedBleed, h)
-    v = Math.max(v, -this.maxSpeed * T.car.reverseFrac)
+    v = Math.max(v, -top * T.car.reverseFrac)
     if (Math.abs(v) < 0.05 && !input.throttle && !input.brake) v = 0
 
     // steering: less lock at speed, more in a drift, smoothed; the tyres can only supply maxLatAccel of cornering
@@ -189,7 +211,7 @@ export class Vehicle {
   updateBoost(h, input) {
     const B = T.boost
     const wantHold = !!input.boost && (this.boosting ? this.boostMeter > 0 : this.boostMeter > B.reengage)
-    if (wantHold) this.boostMeter = Math.max(0, this.boostMeter - h / B.drainTime)
+    if (wantHold) this.boostMeter = Math.max(0, this.boostMeter - h / (B.drainTime * stat("boost_capacity")))
     if (this.burstT > 0) this.burstT -= h
     this.boosting = wantHold || this.burstT > 0
     if (!this.boosting) this.boostMeter = Math.min(1, this.boostMeter + h / B.refillTime)
@@ -204,8 +226,11 @@ export class Vehicle {
     if (this.vy === null && this.y !== 0 && g < this.y - 1.2) { this.vy = 0; this.airY = this.y }
     this.susp.update(this, heightAt, this._dt)
     if (this.vy === null) return
-    if (this.airY <= this.y && this.vy < 0) { this.vy = null; this.landed = true }
-    else this.mesh.position.y += this.airY - this.y
+    if (this.airY <= this.y && this.vy < 0) {
+      const impact = -this.vy
+      this.vy = null; this.landed = true
+      if (impact > LAND_DUST) { this.landImpact = impact; this.landT++; this.susp.impact(impact) }
+    } else this.mesh.position.y += this.airY - this.y
   }
 
   get smoking() { return this.drifting && Math.abs(this.slip) > T.fx.smokeSlip }

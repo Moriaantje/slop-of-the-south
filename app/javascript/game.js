@@ -10,6 +10,7 @@ import { Spells } from "game/Spells"
 import { Dragons } from "game/Dragons"
 import { Npcs } from "game/Npcs"
 import { Quests } from "game/Quests"
+import { Skills } from "game/Skills"
 import { Clouds } from "game/Clouds"
 import { Post } from "game/Post"
 import { Atmosphere } from "game/Atmosphere"
@@ -147,13 +148,13 @@ async function main() {
     onTeleport: (msg) => teleport(msg.x, msg.z, msg.yaw),
     onSwitch: () => {},
     onDeath: (msg) => {
-      if (msg.id === playerId) { burn(900); setTimeout(() => teleport(msg.respawn.x, msg.respawn.z, msg.respawn.yaw), 400) }
+      if (msg.id === playerId) { burn(900); world.chase.shock?.(0.6); setTimeout(() => teleport(msg.respawn.x, msg.respawn.z, msg.respawn.yaw), 400) }
       else effects.explosion(msg.x, chunks.heightAt(msg.x, msg.z) + 1, msg.z, 5)
     },
     onBurn: (msg) => {
       if (msg.id !== playerId) return
       if (msg.shielded) { if (player.mode === "mech") player.mech.mana = Math.max(0, player.mech.mana - 0.06); return }
-      burn(180); effects.shake(0.3)
+      burn(180); effects.shake(0.3); world.chase.shock?.(0.25)
       if (player.mode === "mech") { const f = player.forward(); player.kick(-f.x * 4, -f.z * 4) } else car.speed *= 0.7
     },
     onHeal: () => { chunks.reload(); index.resetState(); combat.reset() },
@@ -162,17 +163,22 @@ async function main() {
     onDialogue: (msg) => quests?.receiveDialogue(msg),
     onQuest: (msg) => quests?.receiveQuest(msg),
     onQuests: (list) => quests?.setAll(list),
+    onLevelUp: () => { effects.flash(car.x, car.y + 3, car.z, 3.2); effects.shake(0.25) },
+    onSkill: () => effects.flash(car.x, car.y + 2, car.z, 1.6),
   })
   quests = new Quests({ els: { dialoog: el("dialoog"), dialoogNaam: el("dialoog-naam"), dialoogRol: el("dialoog-rol"), dialoogTekst: el("dialoog-tekst"), dialoogOpties: el("dialoog-opties"), log: el("logboek"), logLijst: el("logboek-lijst") },
     session, send: (a, d) => net.send(a, d), scene: world.scene, heightAt: (x, z) => chunks.heightAt(x, z), npcs })
+  // the skill tree (B): it builds its own panel and listens for its own key, so it needs nothing from the view
+  const skills = new Skills({ session, send: (a, d) => net.send(a, d) })
   const promptEl = el("prompt")
   const doelwitEl = el("doelwit"), doelwitNaam = el("doelwit-naam"), doelwitBar = el("doelwit-bar"), hitmarkEl = el("hitmark")
   dragons = new Dragons({ scene: world.scene, assets, effects, session, send: (a, d) => net.send(a, d), heightAt: (x, z) => chunks.heightAt(x, z),
     hud: { hit: () => { hitmarkEl.classList.remove("on"); void hitmarkEl.offsetWidth; hitmarkEl.classList.add("on") } } })
   spells.targets = (x, z, yaw) => dragons.nearest(x, z, yaw)
+  spells.chainTarget = (from, hit) => dragons.nextInChain(from, hit)
   spells.onStrike = (target, kind) => dragons.struck(target, kind)
   combat.onStrike = (target, kind) => dragons.struck(target, kind)
-  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, player, spells, dragons, npcs, quests, scatter, props, grass, air, post, quality, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
+  window.slop = { world, dayNight, skyEnv, ortho: chunks.ortho, assets, player, spells, dragons, npcs, quests, skills, scatter, props, grass, air, post, quality, car, remotes, chunks, session, hubs, index, combat, effects, pickups, loading, picker, applySpec, tuning: TUNING }   // for poking at the scene from the console
   // ?name=Pietje sets the driver name other players see above your car (kept in localStorage)
   const nameParam = new URLSearchParams(location.search).get("name")
   if (nameParam) localStorage.setItem("driverName", nameParam.trim().slice(0, 16))
@@ -324,7 +330,7 @@ async function main() {
         debugEl.textContent = [
           `${fps} fps · ${info.render.calls} calls · ${(info.render.triangles / 1e6).toFixed(2)} M tris · ${info.memory.textures} textures · ${info.programs?.length ?? "?"} programs`,
           `gpu ${dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "?"} · ${navigator.userAgent.split(") ").pop()}`,
-          `quality ${quality.name} (${quality.level}) · scale ${world.renderer.getPixelRatio().toFixed(2)} · post ${post.enabled ? "on" : "off"} · ao ${post.ao?.enabled ? "on" : "off"} · shadows ${world.shadows ? world.sun.shadow.mapSize.x : "off"}/${quality.shadowEvery}f · grass ${grass.layers.size} tiles`,
+          `quality ${quality.name} (${quality.level}) · scale ${world.renderer.getPixelRatio().toFixed(2)} · post ${!post.enabled ? "off" : post.bypass ? "bypass" : "on"} · ao ${post.ao?.enabled ? "on" : "off"} · shadows ${world.shadows ? world.sun.shadow.mapSize.x : "off"}/${quality.shadowEvery}f · grass ${grass.layers.size} tiles`,
           `textures ok ${textureStats.ok} failed ${textureStats.failed} ${textureStats.last}`,
           `ortho ${chunks.ortho.enabled ? `ready ${chunks.ortho.stats.ready} loads ${chunks.ortho.stats.loads} failed ${chunks.ortho.stats.failed}` : "off"} · tiles ${chunks.tiles.size}`,
           ...(shaderErrors.length ? [`SHADER ERRORS (${shaderErrors.length}): ${shaderErrors[shaderErrors.length - 1]}`] : []),

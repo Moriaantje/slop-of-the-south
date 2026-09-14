@@ -1,44 +1,54 @@
-import { TUNING as T, smoothstep } from "game/Tuning"
+import { TUNING as T } from "game/Tuning"
 import { Vehicle } from "game/Vehicle"
 import { Mech } from "game/Mech"
+import { stat } from "game/Skills"
 import { TransformFx } from "game/TransformFx"
 
-// The player: a car (Vehicle) and a wizard mech (Mech), one of them active, with the transformation between them.
-// Everything that used to talk to `car` talks to this: the properties of the active body are forwarded, so the
-// camera, Combat, the HUD and the network code are none the wiser. T starts the morph (grounded, not drifting,
-// 2 s cooldown). `onMode(mode, body)` fires at the swap so game.js can tell the server (`switch`) and restyle the HUD.
+// The player: one machine with two minds. Vehicle drives it and Mech walks it, one of them in charge at a time, and
+// the transformation between them. Everything that used to talk to `car` talks to this: the properties of the active
+// body are forwarded, so the camera, Combat, the HUD and the network code are none the wiser. T starts the morph
+// (grounded, not drifting, 2 s cooldown). `onMode(mode, body)` fires at the handover so game.js can tell the server
+// (`switch`) and restyle the HUD.
 //
-// The transformation used to spin the old body a full turn while squashing it flat and then spin the new one back,
-// which read as a cheap sprite trick rather than as a machine changing shape. It is now a fold. Each body owns a
-// `userData.fold(k)` that poses it between driving (k = 0) and a compact block (k = 1) — the car tucks its wheels
-// inboard and up under its arches, narrows, squeezes along its length and rears onto its tail; the mech crouches,
-// draws its legs under itself, folds its arms across the core and pulls the cloak in. The first half of the beat
-// runs that fold in on a smoothstep while a glow gathers; at the swap the bodies are exchanged inside a flash, a
-// ground shockwave and a column of light, which is what hides the exchange; the second half runs the new body's
-// fold out on a damped spring whose tail crosses zero, so the machine over-extends a little and settles back rather
-// than arriving at its pose and stopping dead. The timing contract is untouched: TUNING.transform.swapAt is when
-// the bodies swap, TUNING.transform.time is when the whole thing is over and both scales are exactly one again.
-const UNFOLD_DAMP = 4.2        // /unit: how fast the unfold spring loses its energy
-const UNFOLD_FREQ = 4.6        // rad over the unfold: crosses zero around two thirds through, then rings once
-const SHAKE = 0.34             // camera shake at the swap, when an Effects is wired in
+// The transformation used to be a substitution: the car folded itself into a block, the flash covered a frame in
+// which one mesh left the scene and another joined it, and the second mesh unfolded. However well dressed, the eye
+// reads that as a swap, because it is one. It is now a single mesh with two poses (Vehicles.js, Morph.js). Both
+// bodies share it — Vehicle's suspension writes the wheel pivots, Mech's walk writes the limb pivots, and the morph
+// writes the mounts those pivots hang inside, so nobody fights anybody — and the whole beat is one number travelling
+// from 0 to 1 while every panel, wheel and limb crosses between its two transforms on its own window of the clock.
+// Nothing is added to the scene, nothing is removed from it, and nothing is hidden: the bonnet you were looking at
+// is the chest plate you end up looking at.
+//
+// The timing contract is untouched. TUNING.transform.time is the length of the beat, at the end of which the machine
+// is exactly in its new pose; TUNING.transform.swapAt is when control changes hands, which is the moment the physics,
+// the HUD and the server switch bodies, and where the flash and the shockwave go — not to hide a substitution any
+// more, but to mark the handover, which is a real event with a real discontinuity in it (a car's sprung attitude is
+// not a mech's). What the player sees is continuous straight through it.
+const SHAKE = 0.34             // camera shake at the handover, when an Effects is wired in
 const COLOUR = { mech: 0x7fd2ff, car: 0xffb257 }   // cold arcane going in, warm combustion coming back out
 
 export class Avatar {
+  // `assets` is accepted and ignored: the mech used to wear a downloaded glTF robot and no longer does (Mech.js says
+  // why). The argument stays so game.js keeps working unchanged.
   constructor({ spawn, spec, scene, assets = null, heightAt = null, waterAt = null, onMode = null, effects = null }) {
     this.scene = scene
     this.onMode = onMode
     this.effects = effects
     this.car = new Vehicle(spawn, spec)
-    this.mech = new Mech(spawn, { assets, heightAt, waterAt })
+    this.mech = new Mech(spawn, { body: this.car.mesh, heightAt, waterAt })
     this.mode = "car"
     this.active = this.car
     this.morph = null
     this.cooldown = 0
     this.fx = new TransformFx(scene)
+    this.fx.build()                               // eagerly: the show must not allocate its sprites mid-transformation
     this._dt = 1 / 60
-    for (const m of [this.car.mesh, this.mech.mesh]) m.traverse((o) => { if (o.isMesh && !o.isSprite) o.castShadow = true })
+    this.dress(this.car.mesh)
     scene.add(this.car.mesh)
   }
+
+  // Everything solid casts; the cloak asks not to, because two-sided cloth self-shadows into mud.
+  dress(mesh) { mesh.traverse((o) => { if (o.isMesh && !o.isSprite && !o.userData.noShadow) o.castShadow = true }) }
 
   // ---- the Vehicle contract, forwarded --------------------------------------------------------------------------
   get x() { return this.active.x } set x(v) { this.active.x = v }
@@ -58,7 +68,7 @@ export class Avatar {
   get transforming() { return !!this.morph }
   forward() { return this.active.forward() }
   reset(spawn) { this.car.reset(spawn); this.mech.reset(spawn); if (this.morph) this.finishMorph() }
-  setNight(d) { this.car.setNight(d); this.mech.setNight(d) }
+  setNight(d) { this.car.setNight(d); this.mech.setNight(d); this.carFittings() }
   addBoost(fill, burst = 0) { this.active.addBoost(fill, burst) }
   kick(x, z) { this.active.kick(x, z) }
   jump(v) { this.active.jump(v) }
@@ -66,11 +76,16 @@ export class Avatar {
     return { ...this.active.state(), vehicle: this.mode === "mech" ? "mech" : this.car.spec.id, shield: this.mode === "mech" && this.mech.shield, air: this.active.vy !== null }
   }
 
-  // a new car from the picker (the mech is not in the roster: T gets you there)
+  // A new car from the picker (the mech is not in the roster: T gets you there). The mech has to be handed the new
+  // body too, because the machine the player walks in is whichever machine they were driving.
   setSpec(spec) {
     const old = this.car.setSpec(spec)
-    this.car.mesh.traverse((o) => { if (o.isMesh && !o.isSprite) o.castShadow = true })
-    if (this.mode === "car") { this.scene.remove(old); this.scene.add(this.car.mesh) }
+    const mesh = this.car.mesh
+    this.dress(mesh)
+    if (old) this.scene.remove(old)
+    this.scene.add(mesh)
+    this.mech.useBody(mesh)
+    this.pose(this.mode === "mech" ? 1 : 0)
     return old
   }
 
@@ -89,10 +104,13 @@ export class Avatar {
     this.fx.update(this._dt)
   }
 
+  // pose the one machine: u = 0 is the vehicle, u = 1 is the mech; dir mirrors the deployment order on the way back
+  pose(u, dir = u > 0.5 ? 1 : -1) { this.mesh.userData.pose?.(u, dir) }
+
   begin(mode) {
     const from = this.active, to = mode === "mech" ? this.mech : this.car
     this.carry(from, to)
-    this.morph = { t: 0, from, to, mode, swapped: false, colour: COLOUR[mode] }
+    this.morph = { scale: Math.max(0.2, stat("transform_time")), t: 0, from, to, mode, swapped: false, colour: COLOUR[mode], dir: mode === "mech" ? 1 : -1 }
   }
 
   // instant, without the show: the server says which body you were in, or the picker chose a car while in the mech
@@ -102,8 +120,7 @@ export class Avatar {
     const from = this.active, to = mode === "mech" ? this.mech : this.car
     this.carry(from, to)
     this.swap(to, mode)
-    from.mesh.userData.fold?.(0)
-    to.mesh.userData.fold?.(0)
+    this.pose(mode === "mech" ? 1 : 0, mode === "mech" ? 1 : -1)
   }
 
   carry(from, to) {
@@ -111,20 +128,31 @@ export class Avatar {
     to.speed = 0; to.vx = 0; to.vz = 0
     from.speed = 0; from.vx = 0; from.vz = 0
     if ("lateral" in from) from.lateral = 0
-    to.mesh.position.copy(from.mesh.position); to.mesh.rotation.set(0, from.yaw, 0)
   }
 
+  // The handover: which body the game asks about from now on. No scene surgery — both bodies have always been the
+  // same mesh — so this is bookkeeping plus the one callback game.js hangs the HUD and the network switch off.
   swap(to, mode) {
-    this.scene.remove(this.active.mesh)
-    this.active.mesh.scale.set(1, 1, 1)
-    this.scene.add(to.mesh)
-    this.mode = mode; this.active = to
+    this.mode = mode
+    this.active = to
+    this.carFittings()
     this.onMode?.(mode, to)
+  }
+
+  // The two fittings that used to be switched off for free by the car mesh leaving the scene, and are not any more:
+  // the headlight spots, which on a machine standing on two legs would sweep across the sky, and the exhaust flames,
+  // which would otherwise be left burning out of the reactor pack by anyone who transformed mid-boost. Re-asserted
+  // every frame alongside the night level rather than only at the handover, so it cannot drift out of step.
+  carFittings() {
+    const driving = this.mode === "car"
+    for (const spot of this.car.spots) spot.visible = driving && this.car.darkness > 0.02
+    if (driving) return
+    for (const f of this.mesh.userData.flames ?? []) { f.sprite.visible = false; if (f.core) f.core.visible = false }
   }
 
   stepMorph(dt) {
     const R = T.transform, m = this.morph
-    m.t += dt
+    m.t += dt / m.scale                      // an unlocked skill shortens the beat; every window keeps its share of it
     if (!m.swapped && m.t >= R.swapAt) {
       m.swapped = true
       const x = m.from.x, y = m.from.y, z = m.from.z
@@ -135,27 +163,24 @@ export class Avatar {
     if (m.t >= R.time) this.finishMorph()
   }
 
-  // fold the old body in, then let the new one spring out and settle (after settle, which places the meshes)
+  // Drive the one number, after settle() has placed the root. The clock is deliberately linear: every part already
+  // leaves and arrives at rest inside its own window, so easing the clock as well would only pile the two curves on
+  // top of each other and fling the panels through the middle of the beat at three times the speed they need. Linear
+  // also means a window means what it says — the head really does start at seven tenths of the way through.
   morphVisual() {
     const R = T.transform, m = this.morph
-    if (!m.swapped) {
-      const k = smoothstep(0, 1, Math.min(1, m.t / R.swapAt))
-      m.from.mesh.userData.fold?.(k)
-      this.fx.charge(m.from.x, m.from.mesh.position.y, m.from.z, k, m.colour)
-    } else {
-      const u = Math.min(1, (m.t - R.swapAt) / (R.time - R.swapAt))
-      m.to.mesh.userData.fold?.(Math.exp(-UNFOLD_DAMP * u) * Math.cos(UNFOLD_FREQ * u))
-    }
+    const k = Math.min(1, m.t / R.time)
+    this.pose(m.dir > 0 ? k : 1 - k, m.dir)
+    if (!m.swapped) this.fx.charge(m.from.x, m.from.mesh.position.y, m.from.z, Math.min(1, m.t / R.swapAt), m.colour)
   }
 
   finishMorph() {
     const m = this.morph
     if (!m) return
-    this.fx?.clear?.()                          // an interrupted fold never reaches burst(), which would clear it
+    this.fx?.clear?.()                          // an interrupted morph never reaches burst(), which would clear it
     if (!m.swapped) this.swap(m.to, m.mode)
-    m.to.mesh.scale.set(1, 1, 1); m.from.mesh.scale.set(1, 1, 1)
-    m.to.mesh.userData.fold?.(0); m.from.mesh.userData.fold?.(0)
     this.morph = null
-    this.cooldown = T.transform.cooldown
+    this.pose(m.dir > 0 ? 1 : 0, m.dir)
+    this.cooldown = T.transform.cooldown * stat("transform_time")
   }
 }

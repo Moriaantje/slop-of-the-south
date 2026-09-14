@@ -3,6 +3,7 @@ import { ChaseCamera } from "game/Camera"
 import { off } from "game/Flags"
 import { TUNING as T } from "game/Tuning"
 import { installHeightFog } from "game/HeightFog"
+import { ALPHA } from "game/Layers"
 
 // Renderer, camera, light and atmosphere. Nothing game-specific lives here.
 //
@@ -17,8 +18,11 @@ installHeightFog()
 
 export class World {
   constructor(container) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true })
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5))   // 2× on a Retina screen quadruples the fill cost for little gain with MSAA on
+    // The canvas gets multisampling only when there is no post chain to do the antialiasing. With the chain on, the
+    // world is rendered into an offscreen buffer and only the finished picture is blitted to the canvas, so canvas
+    // MSAA was resolving an image that had no edges left to resolve — pure bandwidth, every frame, for nothing.
+    this.renderer = new THREE.WebGLRenderer({ antialias: off("post"), stencil: false, powerPreference: "high-performance" })
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5))   // 2× on a Retina screen quadruples the fill cost for little gain
     this.renderer.setSize(innerWidth, innerHeight)
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     container.appendChild(this.renderer.domElement)
@@ -32,6 +36,12 @@ export class World {
     this.scene.fog = new THREE.Fog(sky, FOG_NEAR, FOG_FAR)
 
     this.camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.5, 4000)
+    // Everything cut out or translucent is built onto its own layer (game/Layers.noAO). That layer is enabled here,
+    // once, for both the eye and the sun, rather than by whatever happens to be looking at the scene: it used to be
+    // switched on by the post chain, which meant that turning the post chain off made every leaf, tuft and hedge in
+    // the province disappear. The layer stays a useful marker for passes that want to skip cut-outs; nothing is
+    // allowed to depend on it for visibility again.
+    this.camera.layers.enable(ALPHA)
 
     this.hemi = new THREE.HemisphereLight(0xcfe0f2, 0x5b6b4a, 0.5)
     this.sun  = new THREE.DirectionalLight(0xfff6e2, 1.6)
@@ -60,6 +70,7 @@ export class World {
       this.sun.shadow.bias = SHADOW_BIAS
       this.sun.shadow.normalBias = SHADOW_NORMAL_BIAS
       this.sun.shadow.radius = 2
+      this.sun.shadow.camera.layers.enable(ALPHA)
     }
 
     this.chase = new ChaseCamera(this.camera)

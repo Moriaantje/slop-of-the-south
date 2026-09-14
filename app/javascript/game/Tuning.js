@@ -85,12 +85,10 @@ export const TUNING = {
   },
   transform: {
     time: 1.2, swapAt: 0.5, cooldown: 2,
-    unfoldDamp: 4.2,       // /unit: how fast the unfold spring settles
-    unfoldFreq: 4.6,       // the spring's frequency: the overshoot you see as the panels lock
     shake: 0.34,           // camera shake at the swap
   },
   spells: {
-    fireball:  { mana: 0.2, speed: 60, r: 6, dmg: 80, cd: 0.6, life: 3 },
+    fireball:  { mana: 0.2, speed: 60, r: 6, dmg: 60, cd: 0.6, life: 3 },   // the server caps a strike at 60: send what it will honour
     lightning: { mana: 0.35, range: 200, ahead: 60, r: 3, dmg: 30, cd: 1.5 },
     aimCone: 0.44, aimRange: 300,    // auto-aim: a dragon within this angle and range is the target
   },

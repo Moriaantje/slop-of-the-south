@@ -65,7 +65,7 @@ export class RemoteCars {
         car.bubble = new ShieldBubble(car.mesh, 3.2, T2.mech.height * 0.55)
         car.shadow.size(2.2, 2.2)
       } else {
-        car.mesh = makeVehicleMesh(vehicle, car.color)
+        car.mesh = makeVehicleMesh(vehicle, car.color, { morph: false })   // a remote never transforms in place: it gets its own mech body
         car.fx = new VehicleFx(car.mesh, this.pool)
         car.shadow.size(1.2, 2.4)
       }

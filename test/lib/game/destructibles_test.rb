@@ -25,7 +25,7 @@ module Game
       assert_not s.action_allowed?(1000 + 59_999)
       assert_equal 61_000, s.next_action_at
       assert s.action_allowed?(61_000)
-      assert_equal %i[id name vehicle hp gold xp discovered last_hub_key], s.attrs.keys
+      assert_equal %i[id name vehicle hp gold xp discovered unlocked last_hub_key], s.attrs.keys
     end
   end
 end

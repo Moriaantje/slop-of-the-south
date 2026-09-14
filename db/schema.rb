@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_12_000004) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_13_000030) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -107,6 +107,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_12_000004) do
     t.string "last_hub_key"
     t.datetime "last_seen_at"
     t.string "name"
+    t.string "unlocked", default: [], null: false, array: true
     t.datetime "updated_at", null: false
     t.string "vehicle", default: "auto", null: false
     t.integer "xp", default: 0, null: false
@@ -145,16 +146,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_12_000004) do
     t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.datetime "deadline_at"
+    t.datetime "expires_at"
     t.string "hub_key", null: false
     t.string "key", null: false
     t.string "kind", null: false
+    t.string "line"
     t.jsonb "objective", default: {}, null: false
     t.string "player_id", null: false
     t.jsonb "progress", default: {}, null: false
     t.jsonb "reward", default: {}, null: false
+    t.integer "stage", default: 0, null: false
     t.string "status", default: "active", null: false
+    t.integer "step", default: 0, null: false
     t.datetime "updated_at", null: false
+    t.index ["player_id", "hub_key"], name: "index_quests_on_player_id_and_hub_key"
     t.index ["player_id", "key"], name: "index_quests_on_player_id_and_key", unique: true
+    t.index ["player_id", "line", "status"], name: "index_quests_on_player_id_and_line_and_status"
     t.index ["player_id", "status"], name: "index_quests_on_player_id_and_status"
   end
 
